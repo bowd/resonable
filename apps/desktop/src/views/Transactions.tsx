@@ -30,6 +30,7 @@ type Filters = {
   sign: "" | "debit" | "credit";
   from: string;
   to: string;
+  tagIds: string[];
 };
 
 function matchesFilters(tx: Transaction, effectiveCat: string | undefined, f: Filters): boolean {
@@ -45,22 +46,29 @@ function matchesFilters(tx: Transaction, effectiveCat: string | undefined, f: Fi
     const hay = `${tx.counterparty ?? ""} ${tx.description}`.toLowerCase();
     if (!hay.includes(q)) return false;
   }
+  if (f.tagIds.length > 0) {
+    const active = effectiveTagIds(tx);
+    for (const id of f.tagIds) {
+      if (!active.has(id)) return false;
+    }
+  }
   return true;
 }
 
 function FilterBar({
-  value, onChange, categories, accounts, total, shown,
+  value, onChange, categories, accounts, tags, total, shown,
 }: {
   value: Filters;
   onChange: (next: Filters) => void;
   categories: { id: string; name: string }[];
   accounts: { id: string; name: string }[];
+  tags: { id: string; name: string; color: string }[];
   total: number;
   shown: number;
 }) {
   const set = (partial: Partial<Filters>) => onChange({ ...value, ...partial });
-  const clear = () => onChange({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "" });
-  const active = Boolean(value.query || value.categoryId || value.accountId || value.sign || value.from || value.to);
+  const clear = () => onChange({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "", tagIds: [] });
+  const active = Boolean(value.query || value.categoryId || value.accountId || value.sign || value.from || value.to || value.tagIds.length);
 
   return (
     <div className="card">
@@ -87,6 +95,32 @@ function FilterBar({
         <input type="date" value={value.from} onChange={(e) => set({ from: e.target.value })} />
         <input type="date" value={value.to} onChange={(e) => set({ to: e.target.value })} />
       </div>
+      {tags.length > 0 && (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Require tags:</span>
+          {tags.map((t) => {
+            const on = value.tagIds.includes(t.id);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => set({ tagIds: on ? value.tagIds.filter((x) => x !== t.id) : [...value.tagIds, t.id] })}
+                style={{
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: on ? t.color : "transparent",
+                  color: on ? "white" : "inherit",
+                  border: `1px solid ${t.color}`,
+                  cursor: "pointer",
+                }}
+              >
+                {t.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="muted" style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>{shown} of {total} transactions</span>
         {active && <button onClick={clear}>Clear filters</button>}
@@ -118,7 +152,7 @@ export function TransactionsView() {
 
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Filters>({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "" });
+  const [filters, setFilters] = useState<Filters>({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "", tagIds: [] });
 
   const accountChoices = useMemo(() => {
     const out: { id: string; name: string }[] = [];
@@ -128,6 +162,15 @@ export function TransactionsView() {
     }
     return out;
   }, [firstHousehold, firstHousehold?.accounts?.length]);
+
+  const tagChoices = useMemo(() => {
+    const out: { id: string; name: string; color: string }[] = [];
+    for (const t of firstHousehold?.tags ?? []) {
+      if (!t || t.archived) continue;
+      out.push({ id: t.id, name: t.name, color: t.color });
+    }
+    return out;
+  }, [firstHousehold, firstHousehold?.tags?.length]);
 
   const filtered = useMemo(
     () => all.filter(({ tx }) => matchesFilters(tx, effectiveCategoryId(tx), filters)),
@@ -190,6 +233,7 @@ export function TransactionsView() {
         onChange={setFilters}
         categories={categories}
         accounts={accountChoices}
+        tags={tagChoices}
         total={all.length}
         shown={filtered.length}
       />
