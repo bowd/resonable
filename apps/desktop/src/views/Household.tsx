@@ -5,6 +5,7 @@ import {
   Category,
   CategoryList,
   Household,
+  Rule,
   RuleList,
   Tag,
   TagList,
@@ -17,6 +18,17 @@ const STARTER_TAGS: Array<{ name: string; color: string }> = [
   { name: "shared",    color: "#16a34a" },
   { name: "recurring", color: "#a855f7" },
   { name: "travel",    color: "#ea580c" },
+];
+
+/**
+ * Starter rules reference the matching starter category by name, resolved to the
+ * newly-minted Category id at seed time. Kept conservative: merchants only, no
+ * regex, no amount constraints \u2014 so they generalize without false positives.
+ */
+const STARTER_RULES: Array<{ name: string; categoryName: string; contains: string[] }> = [
+  { name: "Streaming subscriptions", categoryName: "Subscriptions", contains: ["netflix", "spotify", "disney", "apple tv", "hbo max", "youtube premium"] },
+  { name: "Amazon shopping",          categoryName: "Shopping",      contains: ["amazon"] },
+  { name: "Ride-hailing",              categoryName: "Transport",     contains: ["uber", "bolt.eu", "freenow", "taxi"] },
 ];
 
 const STARTER_CATEGORIES: Array<{ name: string; color: string; icon?: string }> = [
@@ -54,7 +66,39 @@ export function HouseholdView() {
     for (const t of STARTER_TAGS) {
       tags.push(Tag.create({ name: t.name, color: t.color, archived: false }, { owner: group }));
     }
+    const categoryByName = new Map<string, Category>();
+    for (const c of categories) if (c) categoryByName.set(c.name, c);
     const rules = RuleList.create([], { owner: group });
+    for (const r of STARTER_RULES) {
+      const cat = categoryByName.get(r.categoryName);
+      if (!cat) continue;
+      const conditions = r.contains.map((value) => ({
+        kind: "counterpartyContains" as const,
+        value,
+        caseInsensitive: true,
+      }));
+      const spec = {
+        match: { any: conditions },
+        action: { setCategoryId: cat.id },
+      };
+      rules.push(
+        Rule.create(
+          {
+            name: r.name,
+            specJson: JSON.stringify(spec),
+            priority: 0,
+            enabled: true,
+            source: "derived",
+            confidence: 0.95,
+            createdByAccountId: me.id,
+            createdAt: new Date().toISOString(),
+            hitCount: 0,
+            provenance: "Seeded on household creation.",
+          },
+          { owner: group },
+        ),
+      );
+    }
     const household = Household.create(
       {
         name,
