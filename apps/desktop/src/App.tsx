@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { JazzApp } from "./jazz";
+import { platform } from "./platform";
 import { HouseholdView } from "./views/Household";
 import { AccountsView } from "./views/Accounts";
 import { TransactionsView } from "./views/Transactions";
@@ -26,7 +27,16 @@ function Shell() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <h1>Resonable</h1>
+        <h1>
+          Resonable
+          <span
+            className="pill"
+            title={platform.isNative ? "Running in Tauri: secrets in OS keychain, native HTTP to GoCardless." : platform.mode === "broker" ? "Web + self-hosted broker for bank data." : "Fixture mode: Revolut/N26 sample data, no network."}
+            style={{ marginLeft: 6, fontSize: 10, verticalAlign: "middle" }}
+          >
+            {platform.mode}
+          </span>
+        </h1>
         <nav className="nav">
           <NavButton current={tab} id="dashboard" onClick={setTab}>Dashboard</NavButton>
           <NavButton current={tab} id="household" onClick={setTab}>Household</NavButton>

@@ -28,11 +28,21 @@ export function ModerationView() {
     ],
   );
 
-  const authors = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) set.add(r.label.byAccountId);
-    return [...set];
+  const authorStats = useMemo(() => {
+    const map = new Map<string, { total: number; revoked: number; bySource: Record<string, number> }>();
+    for (const r of rows) {
+      const m = map.get(r.label.byAccountId) ?? { total: 0, revoked: 0, bySource: {} };
+      m.total++;
+      if (r.label.revoked) m.revoked++;
+      m.bySource[r.label.source] = (m.bySource[r.label.source] ?? 0) + 1;
+      map.set(r.label.byAccountId, m);
+    }
+    return [...map.entries()]
+      .map(([accountId, stats]) => ({ accountId, ...stats }))
+      .sort((a, b) => b.total - a.total);
   }, [rows]);
+
+  const authors = authorStats.map((a) => a.accountId);
 
   const filtered = rows.filter((r) => {
     if (!showRevoked && r.label.revoked) return false;
@@ -56,6 +66,31 @@ export function ModerationView() {
         Every label is an append-only overlay attributed to a member.
         Admins can revoke any label; non-admins can only revoke their own.
       </p>
+      {authorStats.length > 0 && (
+        <div className="card">
+          <strong>Activity by member</strong>
+          <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+            {authorStats.map((a) => {
+              const sources = Object.entries(a.bySource)
+                .sort((x, y) => y[1] - x[1])
+                .map(([s, n]) => `${s}:${n}`)
+                .join(" \u00b7 ");
+              return (
+                <div key={a.accountId} className="row" style={{ padding: "4px 0" }}>
+                  <div>
+                    <strong>{shortId(a.accountId)}</strong>
+                    <span className="muted" style={{ marginLeft: 6 }}>{sources}</span>
+                  </div>
+                  <div className="muted">
+                    {a.total} label{a.total === 1 ? "" : "s"}
+                    {a.revoked > 0 && ` \u2022 ${a.revoked} revoked`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="card">
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ margin: 0 }}>Author</label>
