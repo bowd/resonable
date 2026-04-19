@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { Group } from "jazz-tools";
 import {
+  exportTransactionsCsv,
   runPipeline,
+  type CsvExportRow,
   type LabelPlan,
   type SuggestionPlan,
 } from "@resonable/core";
@@ -153,6 +155,9 @@ export function TransactionsView() {
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "", tagIds: [] });
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
+  const [bulkTagIds, setBulkTagIds] = useState<string[]>([]);
 
   const accountChoices = useMemo(() => {
     const out: { id: string; name: string }[] = [];
@@ -176,6 +181,117 @@ export function TransactionsView() {
     () => all.filter(({ tx }) => matchesFilters(tx, effectiveCategoryId(tx), filters)),
     [all, filters],
   );
+
+  // Keep selection trimmed to ids still visible under current filters so that
+  // toggling filters can't leave us acting on invisible rows.
+  const visibleSelected = useMemo(() => {
+    const visibleIds = new Set<string>(filtered.map(({ tx }) => tx.id as string));
+    const next = new Set<string>();
+    for (const id of selected) if (visibleIds.has(id)) next.add(id);
+    return next;
+  }, [selected, filtered]);
+
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every(({ tx }) => visibleSelected.has(tx.id));
+
+  function toggleRow(id: string, on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible(on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) for (const { tx } of filtered) next.add(tx.id);
+      else for (const { tx } of filtered) next.delete(tx.id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  function applyBulkCategory() {
+    if (!firstHousehold || !me || !bulkCategoryId || visibleSelected.size === 0) return;
+    const group = firstHousehold._owner.castAs(Group);
+    bulkApplyCategory(
+      { household: firstHousehold, meAccountId: me.id, group },
+      Array.from(visibleSelected),
+      bulkCategoryId,
+      "user-bulk",
+    );
+    clearSelection();
+    setBulkCategoryId("");
+  }
+
+  function applyBulkTags() {
+    if (!firstHousehold || !me || bulkTagIds.length === 0 || visibleSelected.size === 0) return;
+    const group = firstHousehold._owner.castAs(Group);
+    const ctx = { household: firstHousehold, meAccountId: me.id, group };
+    const txById = new Map<string, Transaction>();
+    for (const { tx } of filtered) txById.set(tx.id, tx);
+    const findTag = (id: string) => {
+      for (const t of firstHousehold.tags ?? []) {
+        if (t && t.id === id) return t;
+      }
+      return undefined;
+    };
+    for (const txId of visibleSelected) {
+      const tx = txById.get(txId);
+      if (!tx) continue;
+      for (const tagId of bulkTagIds) {
+        const tag = findTag(tagId);
+        if (!tag) continue;
+        addTagToTransaction(ctx, tx, tag);
+      }
+    }
+    clearSelection();
+    setBulkTagIds([]);
+  }
+
+  function exportSelectedCsv() {
+    if (!firstHousehold || visibleSelected.size === 0) return;
+    const categoryNameById = new Map<string, string>(
+      categories.map((c) => [c.id as string, c.name]),
+    );
+    const tagNameById = new Map<string, string>();
+    for (const t of firstHousehold.tags ?? []) {
+      if (t) tagNameById.set(t.id as string, t.name);
+    }
+    const rows: CsvExportRow[] = [];
+    for (const { tx, account } of filtered) {
+      if (!visibleSelected.has(tx.id)) continue;
+      const catId = effectiveCategoryId(tx);
+      const tagIds = effectiveTagIds(tx);
+      rows.push({
+        bookedAt: tx.bookedAt,
+        amountMinor: tx.amountMinor,
+        currency: tx.currency,
+        counterparty: tx.counterparty ?? undefined,
+        description: tx.description,
+        accountName: account.name,
+        categoryName: catId ? categoryNameById.get(catId) : undefined,
+        tagNames: Array.from(tagIds)
+          .map((id) => tagNameById.get(id))
+          .filter((n): n is string => Boolean(n)),
+      });
+    }
+    const csv = exportTransactionsCsv(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   async function runBatch() {
     if (!firstHousehold || !me) return;
@@ -237,8 +353,69 @@ export function TransactionsView() {
         total={all.length}
         shown={filtered.length}
       />
+      {visibleSelected.size > 0 && (
+        <div
+          className="card"
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <strong>{visibleSelected.size} selected</strong>
+          <select
+            value={bulkCategoryId}
+            onChange={(e) => setBulkCategoryId(e.target.value)}
+            style={{ width: "auto" }}
+          >
+            <option value="">Choose category\u2026</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <button
+            className="primary"
+            disabled={!bulkCategoryId}
+            onClick={applyBulkCategory}
+          >
+            Apply
+          </button>
+          <select
+            multiple
+            value={bulkTagIds}
+            onChange={(e) =>
+              setBulkTagIds(Array.from(e.target.selectedOptions).map((o) => o.value))
+            }
+            style={{ width: "auto", minHeight: 28 }}
+          >
+            {tagChoices.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <button disabled={bulkTagIds.length === 0} onClick={applyBulkTags}>
+            Add tags
+          </button>
+          <button onClick={exportSelectedCsv}>Export selected as CSV</button>
+          <button onClick={clearSelection}>Clear selection</button>
+        </div>
+      )}
       {all.length === 0 && <p className="muted">No transactions imported yet.</p>}
       {all.length > 0 && filtered.length === 0 && <p className="muted">No transactions match the filters.</p>}
+      {filtered.length > 0 && (
+        <div className="row" style={{ alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            aria-label="Select all visible"
+            checked={allVisibleSelected}
+            onChange={(e) => toggleAllVisible(e.target.checked)}
+          />
+          <span className="muted">Select all visible ({filtered.length})</span>
+        </div>
+      )}
       {filtered.slice(0, 200).map(({ tx, account }) => (
         <Row
           key={tx.id}
@@ -248,6 +425,8 @@ export function TransactionsView() {
           effectiveId={effectiveCategoryId(tx)}
           household={firstHousehold}
           tagChoices={(firstHousehold.tags ?? []).filter((t) => t && !t.archived).map((t) => ({ id: t!.id, name: t!.name, color: t!.color }))}
+          selected={visibleSelected.has(tx.id)}
+          onToggleSelected={(on) => toggleRow(tx.id, on)}
         />
       ))}
       {filtered.length > 200 && (
@@ -259,7 +438,7 @@ export function TransactionsView() {
 }
 
 function Row({
-  tx, accountName, categories, effectiveId, household, tagChoices,
+  tx, accountName, categories, effectiveId, household, tagChoices, selected, onToggleSelected,
 }: {
   tx: Transaction;
   accountName: string;
@@ -267,6 +446,8 @@ function Row({
   effectiveId?: string;
   household: import("@resonable/schema").Household;
   tagChoices: { id: string; name: string; color: string }[];
+  selected: boolean;
+  onToggleSelected: (on: boolean) => void;
 }) {
   const { me } = useAccount();
   const [expanded, setExpanded] = useState(false);
@@ -311,6 +492,14 @@ function Row({
 
   return (
     <div className="row">
+      <div style={{ alignSelf: "flex-start", paddingTop: 2 }}>
+        <input
+          type="checkbox"
+          aria-label="Select transaction"
+          checked={selected}
+          onChange={(e) => onToggleSelected(e.target.checked)}
+        />
+      </div>
       <div style={{ flex: 1 }}>
         <div>
           <strong>{tx.counterparty ?? "\u2014"}</strong>
