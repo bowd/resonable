@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0",
+  "productName": "Resonable",
+  "version": "0.0.0",
+  "identifier": "tools.resonable.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm --filter @resonable/desktop dev",
+    "beforeBuildCommand": "pnpm --filter @resonable/desktop build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Resonable",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["resonable"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"],
+    "category": "Finance",
+    "shortDescription": "Local-first expense tracker",
+    "longDescription": "Resonable is a local-first household expense tracker with secure bank account data sync.",
+    "resources": [],
+    "externalBin": [],
+    "copyright": "",
+    "publisher": "Resonable"
+  }
+}
