@@ -5,11 +5,12 @@ import { AccountsView } from "./views/Accounts";
 import { TransactionsView } from "./views/Transactions";
 import { ClustersView } from "./views/Clusters";
 import { CategoriesView } from "./views/Categories";
+import { DashboardView } from "./views/Dashboard";
 import { RulesView } from "./views/Rules";
 import { ModerationView } from "./views/Moderation";
 import { SettingsView } from "./views/Settings";
 
-type Tab = "household" | "accounts" | "transactions" | "clusters" | "categories" | "rules" | "moderation" | "settings";
+type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "rules" | "moderation" | "settings";
 
 export function App() {
   return (
@@ -20,12 +21,13 @@ export function App() {
 }
 
 function Shell() {
-  const [tab, setTab] = useState<Tab>("household");
+  const [tab, setTab] = useState<Tab>("dashboard");
   return (
     <div className="app">
       <aside className="sidebar">
         <h1>Resonable</h1>
         <nav className="nav">
+          <NavButton current={tab} id="dashboard" onClick={setTab}>Dashboard</NavButton>
           <NavButton current={tab} id="household" onClick={setTab}>Household</NavButton>
           <NavButton current={tab} id="accounts" onClick={setTab}>Accounts</NavButton>
           <NavButton current={tab} id="transactions" onClick={setTab}>Transactions</NavButton>
@@ -37,6 +39,7 @@ function Shell() {
         </nav>
       </aside>
       <main>
+        {tab === "dashboard" && <DashboardView />}
         {tab === "household" && <HouseholdView />}
         {tab === "accounts" && <AccountsView />}
         {tab === "transactions" && <TransactionsView />}
