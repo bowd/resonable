@@ -21,6 +21,8 @@ export class Rule extends CoMap {
   disabledByAccountId = co.optional.string;
   disabledAt = co.optional.string;
   provenance = co.optional.string;
+  lastEditedByAccountId = co.optional.string;
+  lastEditedAt = co.optional.string;
 }
 
 export class RuleList extends CoList.Of(co.ref(Rule)) {}
