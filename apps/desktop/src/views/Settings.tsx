@@ -1,5 +1,19 @@
 import { useState } from "react";
 import { platform } from "../platform";
+import {
+  deserializeBackup,
+  envelopeToBlob,
+  parseEnvelope,
+  serializeBackup,
+  WrongPassphraseError,
+  type BackupPayload,
+} from "@resonable/core";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
+import {
+  applyBackupPayload,
+  toBackupPayload,
+  type BackupApplyResult,
+} from "../data/backup-mapping";
 
 export function SettingsView() {
   const [llmBase, setLlmBase] = useState(localStorage.getItem("resonable.llm.baseUrl") ?? "http://localhost:11434");
@@ -63,9 +77,239 @@ export function SettingsView() {
           />
         </div>
       )}
+      <BackupCard />
       <div className="card">
         <button className="primary" onClick={save}>Save & reload</button>
       </div>
     </>
   );
+}
+
+/**
+ * Backup UI: passphrase-encrypted export + import for the active household.
+ * State is co-located here because the flow is self-contained and never
+ * leaves this card.
+ */
+function BackupCard() {
+  const { household } = useFirstHousehold();
+  const me = useCurrentAccount();
+
+  // Export form state
+  const [pp1, setPp1] = useState("");
+  const [pp2, setPp2] = useState("");
+  const [insecure, setInsecure] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [exportErr, setExportErr] = useState<string | null>(null);
+
+  // Import form state
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPp, setImportPp] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [importErr, setImportErr] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<BackupApplyResult | null>(null);
+
+  const householdReady = !!household;
+
+  async function doExport() {
+    if (!household) return;
+    setExportErr(null);
+    setExportMsg(null);
+    if (!insecure) {
+      if (pp1.length < 8) {
+        setExportErr("Passphrase must be at least 8 characters.");
+        return;
+      }
+      if (pp1 !== pp2) {
+        setExportErr("Passphrases do not match.");
+        return;
+      }
+    }
+    setExportBusy(true);
+    try {
+      const payload: BackupPayload = toBackupPayload(household);
+      if (insecure) {
+        const json = JSON.stringify(payload, null, 2);
+        const bytes = new TextEncoder().encode(json);
+        const datePart = payload.createdAt.slice(0, 10);
+        downloadBytes(bytes, `resonable-backup-${datePart}.plain.json`, "application/json");
+        setExportMsg(
+          `Wrote plaintext backup (${bytes.byteLength} bytes). This file is NOT encrypted — delete it once you're done.`,
+        );
+      } else {
+        const env = await serializeBackup(payload, pp1);
+        const { bytes, suggestedFilename } = envelopeToBlob(env);
+        downloadBytes(bytes, suggestedFilename, "application/json");
+        setExportMsg(`Wrote encrypted backup (${bytes.byteLength} bytes) as ${suggestedFilename}.`);
+        setPp1("");
+        setPp2("");
+      }
+    } catch (err) {
+      setExportErr((err as Error).message);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function doImport() {
+    if (!household || !me.$isLoaded || !importFile) return;
+    setImportErr(null);
+    setImportResult(null);
+    setImportBusy(true);
+    try {
+      const text = await importFile.text();
+      let payload: BackupPayload;
+      try {
+        // Try encrypted-envelope form first.
+        const env = parseEnvelope(text);
+        payload = await deserializeBackup(env, importPp);
+      } catch (err) {
+        if (err instanceof WrongPassphraseError) {
+          setImportErr("Wrong passphrase");
+          return;
+        }
+        // Not an envelope — fall back to plaintext payload.
+        const parsed = JSON.parse(text) as BackupPayload;
+        if (parsed.version !== 1) {
+          throw new Error(`unsupported payload version: ${parsed.version as unknown as string}`);
+        }
+        payload = parsed;
+      }
+      const group = household.$jazz.owner;
+      const result = applyBackupPayload(
+        { household, meAccountId: me.$jazz.id, group },
+        payload,
+      );
+      setImportResult(result);
+      setImportPp("");
+      setImportFile(null);
+    } catch (err) {
+      if (err instanceof WrongPassphraseError) {
+        setImportErr("Wrong passphrase");
+      } else {
+        setImportErr((err as Error).message);
+      }
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <strong>Backup</strong>
+      <div className="muted" style={{ marginBottom: 8 }}>
+        Export this household as a passphrase-encrypted JSON file, or restore a
+        previous backup. Encrypted backups use AES-256-GCM + PBKDF2; lose the
+        passphrase and the file cannot be recovered.
+      </div>
+
+      {!householdReady && (
+        <div className="muted">Create or join a household first.</div>
+      )}
+
+      {householdReady && (
+        <>
+          <div style={{ marginTop: 4 }}>
+            <strong style={{ fontSize: 13 }}>Export</strong>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+            <input
+              type="checkbox"
+              checked={insecure}
+              onChange={(e) => setInsecure(e.target.checked)}
+              style={{ width: "auto" }}
+            />
+            <span>Export unencrypted (&#9888; insecure, for debugging)</span>
+          </label>
+          {!insecure && (
+            <>
+              <label>Passphrase (&ge; 8 characters)</label>
+              <input
+                type="password"
+                value={pp1}
+                onChange={(e) => setPp1(e.target.value)}
+                placeholder="correct horse battery staple"
+              />
+              <label>Confirm passphrase</label>
+              <input
+                type="password"
+                value={pp2}
+                onChange={(e) => setPp2(e.target.value)}
+              />
+            </>
+          )}
+          <div style={{ marginTop: 8 }}>
+            <button className="primary" onClick={() => { void doExport(); }} disabled={exportBusy}>
+              {exportBusy ? "Exporting\u2026" : insecure ? "Export unencrypted backup" : "Export encrypted backup"}
+            </button>
+          </div>
+          {exportErr && <div className="muted" style={{ color: "#dc2626", marginTop: 6 }}>{exportErr}</div>}
+          {exportMsg && <div className="muted" style={{ marginTop: 6 }}>{exportMsg}</div>}
+
+          <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "16px 0" }} />
+
+          <div>
+            <strong style={{ fontSize: 13 }}>Import</strong>
+          </div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            Imports merge into this household: duplicate accounts / transactions
+            (by bank id), categories / tags (by name) and rules (by
+            name+spec) are skipped.
+          </div>
+          <label>Backup file (.json)</label>
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+          />
+          <label>Passphrase (leave blank for unencrypted backups)</label>
+          <input
+            type="password"
+            value={importPp}
+            onChange={(e) => setImportPp(e.target.value)}
+          />
+          <div style={{ marginTop: 8 }}>
+            <button
+              className="primary"
+              onClick={() => { void doImport(); }}
+              disabled={importBusy || !importFile || !me.$isLoaded}
+            >
+              {importBusy ? "Importing\u2026" : "Import backup"}
+            </button>
+          </div>
+          {importErr && <div className="muted" style={{ color: "#dc2626", marginTop: 6 }}>{importErr}</div>}
+          {importResult && (
+            <div className="muted" style={{ marginTop: 6 }}>
+              Added {importResult.addedCounts.accounts} account(s),{" "}
+              {importResult.addedCounts.transactions} transaction(s),{" "}
+              {importResult.addedCounts.labels} label(s),{" "}
+              {importResult.addedCounts.categories} categor{importResult.addedCounts.categories === 1 ? "y" : "ies"},{" "}
+              {importResult.addedCounts.tags} tag(s),{" "}
+              {importResult.addedCounts.rules} rule(s).
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function downloadBytes(bytes: Uint8Array, filename: string, mime: string) {
+  // Create a detached copy in a fresh ArrayBuffer so Blob doesn't retain a view
+  // over Jazz-owned memory.
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const blob = new Blob([copy], { type: mime });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    // Revoke on next tick so the browser has had a chance to start the download.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }
