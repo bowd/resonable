@@ -6,10 +6,18 @@ import {
   CategoryList,
   Household,
   RuleList,
+  Tag,
   TagList,
 } from "@resonable/schema";
 import { encodeInvite, INVITE_TTL_MS, decodeInvite } from "@resonable/core";
 import { useAccount } from "../jazz";
+
+const STARTER_TAGS: Array<{ name: string; color: string }> = [
+  { name: "business",  color: "#2563eb" },
+  { name: "shared",    color: "#16a34a" },
+  { name: "recurring", color: "#a855f7" },
+  { name: "travel",    color: "#ea580c" },
+];
 
 const STARTER_CATEGORIES: Array<{ name: string; color: string; icon?: string }> = [
   { name: "Groceries",     color: "#16a34a", icon: "\ud83d\uded2" },
@@ -43,6 +51,9 @@ export function HouseholdView() {
       );
     }
     const tags = TagList.create([], { owner: group });
+    for (const t of STARTER_TAGS) {
+      tags.push(Tag.create({ name: t.name, color: t.color, archived: false }, { owner: group }));
+    }
     const rules = RuleList.create([], { owner: group });
     const household = Household.create(
       {
