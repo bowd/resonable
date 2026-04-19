@@ -9,10 +9,11 @@ import { CategoriesView } from "./views/Categories";
 import { DashboardView } from "./views/Dashboard";
 import { TagsView } from "./views/Tags";
 import { RulesView } from "./views/Rules";
+import { ImportView } from "./views/Import";
 import { ModerationView } from "./views/Moderation";
 import { SettingsView } from "./views/Settings";
 
-type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "tags" | "rules" | "moderation" | "settings";
+type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "tags" | "rules" | "import" | "moderation" | "settings";
 
 export function App() {
   return (
@@ -46,6 +47,7 @@ function Shell() {
           <NavButton current={tab} id="categories" onClick={setTab}>Categories</NavButton>
           <NavButton current={tab} id="tags" onClick={setTab}>Tags</NavButton>
           <NavButton current={tab} id="rules" onClick={setTab}>Rules</NavButton>
+          <NavButton current={tab} id="import" onClick={setTab}>CSV import</NavButton>
           <NavButton current={tab} id="moderation" onClick={setTab}>Moderation</NavButton>
           <NavButton current={tab} id="settings" onClick={setTab}>Settings</NavButton>
         </nav>
@@ -59,6 +61,7 @@ function Shell() {
         {tab === "categories" && <CategoriesView />}
         {tab === "tags" && <TagsView />}
         {tab === "rules" && <RulesView />}
+        {tab === "import" && <ImportView />}
         {tab === "moderation" && <ModerationView />}
         {tab === "settings" && <SettingsView />}
       </main>
