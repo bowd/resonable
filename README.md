@@ -87,6 +87,17 @@ Tauri mode stores GoCardless credentials in the OS keychain (via `keyring` crate
 
 Credentials never leave the device. Only short-lived access tokens can be optionally shared via the Jazz household Group so read-only members sync reads.
 
+### Sandbox smoke test
+
+GoCardless publishes a sandbox institution (`SANDBOXFINANCE_SFIN0000`) that auto-approves consent. Use it to verify the end-to-end flow without a real bank account:
+
+```bash
+GOCARDLESS_SECRET_ID=\u2026 GOCARDLESS_SECRET_KEY=\u2026 \
+  pnpm --filter @resonable/core smoke:gocardless
+```
+
+The script mints a token, creates a requisition, prints a consent URL (complete it in any browser), polls until linked, fetches the first account's transactions, and deletes the requisition on exit.
+
 ## Household sync between devices
 
 Households are Jazz Groups. Invite another person:

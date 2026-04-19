@@ -13,12 +13,14 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke:gocardless": "tsx scripts/gc-smoke.ts"
   },
   "dependencies": {
     "@resonable/schema": "workspace:*"
   },
   "devDependencies": {
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   }
