@@ -62,4 +62,22 @@ describe("summarize", () => {
     ], range);
     expect(s.totalSpendMinor).toBe(100);
   });
+
+  it("aggregates spend by tag with multi-tag transactions counting in each tag", () => {
+    const s = summarize([
+      t({ id: "a", amountMinor: -1000, tagIds: ["business", "travel"] }),
+      t({ id: "b", amountMinor: -400, tagIds: ["business"] }),
+      t({ id: "c", amountMinor: -200, tagIds: ["travel"] }),
+      t({ id: "d", amountMinor: -50 }),
+      t({ id: "e", amountMinor: 5000, tagIds: ["business"] }),
+    ], range);
+    const business = s.byTag.find((x) => x.tagId === "business");
+    const travel = s.byTag.find((x) => x.tagId === "travel");
+    expect(business?.spendMinor).toBe(1400);
+    expect(business?.count).toBe(3);
+    expect(travel?.spendMinor).toBe(1200);
+    expect(travel?.count).toBe(2);
+    expect(s.byTag[0]?.tagId).toBe("business");
+    expect(s.byTag[1]?.tagId).toBe("travel");
+  });
 });

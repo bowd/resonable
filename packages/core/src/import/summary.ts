@@ -6,6 +6,7 @@ export type SummaryInput = {
   counterparty?: string;
   accountId?: string;
   categoryId?: string;
+  tagIds?: string[];
 };
 
 export type DateRange = { from: string; to: string };
@@ -16,6 +17,7 @@ export type Summary = {
   totalIncomeMinor: number;
   transactionCount: number;
   byCategory: Array<{ categoryId: string | null; spendMinor: number; count: number }>;
+  byTag: Array<{ tagId: string; spendMinor: number; count: number }>;
   topMerchants: Array<{ counterparty: string; spendMinor: number; count: number }>;
   weekly: Array<{ weekStart: string; spendMinor: number; incomeMinor: number }>;
   uncategorizedCount: number;
@@ -38,6 +40,7 @@ export function summarize(
   let totalSpendMinor = 0;
   let totalIncomeMinor = 0;
   const byCategoryMap = new Map<string | null, { spendMinor: number; count: number }>();
+  const byTagMap = new Map<string, { spendMinor: number; count: number }>();
   const byMerchantMap = new Map<string, { spendMinor: number; count: number }>();
   const byWeekMap = new Map<string, { spendMinor: number; incomeMinor: number }>();
   let uncategorizedCount = 0;
@@ -52,6 +55,16 @@ export function summarize(
     cat.count += 1;
     byCategoryMap.set(catKey, cat);
     if (!t.categoryId) uncategorizedCount++;
+
+    if (t.tagIds && t.tagIds.length > 0) {
+      const spend = t.amountMinor < 0 ? -t.amountMinor : 0;
+      for (const tagId of t.tagIds) {
+        const tag = byTagMap.get(tagId) ?? { spendMinor: 0, count: 0 };
+        tag.spendMinor += spend;
+        tag.count += 1;
+        byTagMap.set(tagId, tag);
+      }
+    }
 
     if (t.amountMinor < 0 && t.counterparty) {
       const key = t.counterparty.trim();
@@ -74,6 +87,10 @@ export function summarize(
     .map(([categoryId, v]) => ({ categoryId, ...v }))
     .sort((a, b) => b.spendMinor - a.spendMinor);
 
+  const byTag = [...byTagMap.entries()]
+    .map(([tagId, v]) => ({ tagId, ...v }))
+    .sort((a, b) => b.spendMinor - a.spendMinor);
+
   const topMerchants = [...byMerchantMap.entries()]
     .map(([counterparty, v]) => ({ counterparty, ...v }))
     .sort((a, b) => b.spendMinor - a.spendMinor)
@@ -89,6 +106,7 @@ export function summarize(
     totalIncomeMinor,
     transactionCount: scoped.length,
     byCategory,
+    byTag,
     topMerchants,
     weekly,
     uncategorizedCount,
