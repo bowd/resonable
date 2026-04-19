@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { platform } from "../platform";
 import {
   deserializeBackup,
@@ -14,6 +14,11 @@ import {
   toBackupPayload,
   type BackupApplyResult,
 } from "../data/backup-mapping";
+import {
+  clearGoCardlessCreds,
+  loadGoCardlessCreds,
+  saveGoCardlessCreds,
+} from "../data/gocardless-creds";
 
 export function SettingsView() {
   const [llmBase, setLlmBase] = useState(localStorage.getItem("resonable.llm.baseUrl") ?? "http://localhost:11434");
@@ -51,6 +56,7 @@ export function SettingsView() {
           <span>Use fixture bank client (Revolut + N26 sample data, no network)</span>
         </label>
       </div>
+      <BankDataCard />
       <div className="card">
         <strong>Sync</strong>
         <div className="muted">
@@ -290,6 +296,120 @@ function BackupCard() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function BankDataCard() {
+  const [secretId, setSecretId] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Only Tauri has an always-available SecretStore. The web fallback needs
+    // a passphrase unlock we don't wire up here.
+    if (!platform.isNative) { setConfigured(false); return; }
+    (async () => {
+      const existing = await loadGoCardlessCreds(platform.secrets);
+      setConfigured(existing !== null);
+      if (existing) setSecretId(existing.secretId);
+    })().catch(() => setConfigured(false));
+  }, []);
+
+  if (!platform.isNative) {
+    return (
+      <div className="card">
+        <strong>Bank data (GoCardless)</strong>
+        <div className="muted" style={{ marginTop: 4 }}>
+          Web mode can't hold OS-keychain credentials. Run the desktop app
+          (Tauri) to store GoCardless secrets, or use demo mode with the
+          built-in Revolut / N26 fixture data.
+        </div>
+      </div>
+    );
+  }
+
+  async function save() {
+    if (!secretId.trim() || !secretKey.trim()) {
+      setErr("Both secret_id and secret_key are required.");
+      return;
+    }
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await saveGoCardlessCreds(platform.secrets, {
+        secretId: secretId.trim(),
+        secretKey: secretKey.trim(),
+      });
+      setConfigured(true);
+      setSecretKey("");
+      setMsg("Saved. Next bank action will mint tokens and verify.");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear() {
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await clearGoCardlessCreds(platform.secrets);
+      setConfigured(false);
+      setSecretId("");
+      setSecretKey("");
+      setMsg("Credentials removed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <strong>Bank data (GoCardless)</strong>
+      <div className="muted" style={{ marginTop: 2 }}>
+        Register a free app at{" "}
+        <a
+          href="https://bankaccountdata.gocardless.com/user/signup"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          bankaccountdata.gocardless.com
+        </a>{" "}
+        and paste the secret_id / secret_key here. Secrets are stored in your
+        OS keychain ({platform.mode === "tauri" ? "native" : "web fallback"})
+        and never leave the device.
+      </div>
+      <label>secret_id</label>
+      <input
+        value={secretId}
+        onChange={(e) => setSecretId(e.target.value)}
+        placeholder="00000000-0000-0000-0000-000000000000"
+        spellCheck={false}
+        autoComplete="off"
+      />
+      <label>secret_key {configured && "(leave blank to keep existing)"}</label>
+      <input
+        type="password"
+        value={secretKey}
+        onChange={(e) => setSecretKey(e.target.value)}
+        placeholder={configured ? "\u2022\u2022\u2022\u2022 stored" : "paste secret_key"}
+        spellCheck={false}
+        autoComplete="off"
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button className="primary" onClick={save} disabled={busy}>Save</button>
+        {configured && (
+          <button onClick={clear} disabled={busy}>Remove</button>
+        )}
+        <span className="muted" style={{ marginLeft: "auto", alignSelf: "center" }}>
+          {configured === null ? "\u2026" : configured ? "configured" : "not configured"}
+        </span>
+      </div>
+      {err && <div className="muted" style={{ color: "#dc2626", marginTop: 6 }}>{err}</div>}
+      {msg && <div className="muted" style={{ marginTop: 6 }}>{msg}</div>}
     </div>
   );
 }

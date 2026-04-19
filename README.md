@@ -81,9 +81,14 @@ Tauri mode stores GoCardless credentials in the OS keychain (via `keyring` crate
 
 1. Register a free app at https://bankaccountdata.gocardless.com/user/signup.
 2. Get a `secret_id` and `secret_key` from the dashboard.
-3. In Tauri mode, **Accounts \u2192 Link Revolut / N26** opens a consent page.
-   After consenting in the browser, click **Check now** on the pending-requisition card (or wait for auto-poll to detect `LN`).
-4. Transactions replicate to every household member via the Jazz sync peer.
+3. In the desktop (Tauri) build, open **Settings \u2192 Bank data** and paste the
+   two secrets. They are stored in your OS keychain via the Rust
+   `keyring` crate and never leave the device.
+4. Back in **Accounts \u2192 Link Revolut / N26**, the first bank action will
+   mint a token pair (verifying the credentials) and open the hosted consent
+   page. After consenting in the browser, click **Check now** on the pending-
+   requisition card (or wait for auto-poll to detect `LN`).
+5. Transactions replicate to every household member via the Jazz sync peer.
 
 Credentials never leave the device. Only short-lived access tokens can be optionally shared via the Jazz household Group so read-only members sync reads.
 

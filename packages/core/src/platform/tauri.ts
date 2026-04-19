@@ -3,21 +3,21 @@ import type { GoCardlessCredentials } from "../gocardless/client";
 import type { TokenPair } from "../gocardless/types";
 
 /**
- * Tauri-backed implementations. These forward to commands defined on the
- * Rust side so that:
- *  - secrets sit in the OS keychain / Stronghold
- *  - HTTP calls to api.gocardless.com bypass browser CORS via Rust reqwest
+ * Tauri 2 bridge.
  *
- * Each command is referenced by name; the Rust crate is not in this repo
- * yet \u2014 add it under src-tauri/ when we wire the desktop shell.
+ * Tauri 2 exposes its command invoke at `window.__TAURI_INTERNALS__.invoke`
+ * (not `window.__TAURI__` as in 1.x). We keep the core package free of
+ * `@tauri-apps/api` by reading the global directly; when Tauri is present
+ * the object is injected before the JS bundle runs.
  */
 
 type TauriInvoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+type TauriInternals = { invoke: TauriInvoke };
 
 function invoke(): TauriInvoke {
-  const anyWin = globalThis as unknown as { __TAURI__?: { core?: { invoke?: TauriInvoke } } };
-  const fn = anyWin.__TAURI__?.core?.invoke;
-  if (!fn) throw new Error("Tauri runtime not detected");
+  const anyWin = globalThis as unknown as { __TAURI_INTERNALS__?: TauriInternals };
+  const fn = anyWin.__TAURI_INTERNALS__?.invoke;
+  if (!fn) throw new Error("Tauri runtime not detected (window.__TAURI_INTERNALS__ missing)");
   return fn;
 }
 
@@ -59,6 +59,6 @@ export class TauriBankDataClient implements BankDataClient {
 }
 
 export function isTauriRuntime(): boolean {
-  const anyWin = globalThis as unknown as { __TAURI__?: unknown };
-  return Boolean(anyWin.__TAURI__);
+  const anyWin = globalThis as unknown as { __TAURI_INTERNALS__?: unknown };
+  return Boolean(anyWin.__TAURI_INTERNALS__);
 }

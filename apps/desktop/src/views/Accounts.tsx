@@ -3,6 +3,7 @@ import type { LoadedAccount, LoadedHousehold } from "@resonable/schema";
 import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import { fixtureBank, platform } from "../platform";
 import { importAccountForConnection, syncAccount } from "../data/import";
+import { ensureBankCredsReady, MissingCredentialsError } from "../data/gocardless-creds";
 
 type PendingRequisition = {
   requisitionId: string;
@@ -106,6 +107,17 @@ function AccountCard({ account, household }: { account: LoadedAccount; household
     try {
       const group = household.$jazz.owner;
       const connectionId = `${household.$jazz.id}:${me.$jazz.id}`;
+      if (platform.mode !== "fixture") {
+        try {
+          await ensureBankCredsReady(platform.bankData, platform.secrets, connectionId);
+        } catch (err) {
+          if (err instanceof MissingCredentialsError) {
+            setMsg("No GoCardless credentials. Open Settings \u2192 Bank data.");
+            return;
+          }
+          throw err;
+        }
+      }
       const res = await syncAccount({
         bank: platform.bankData,
         connectionId,
@@ -232,6 +244,18 @@ function LinkBankForm({ household }: { household: LoadedHousehold }) {
     try {
       const group = household.$jazz.owner;
       const connectionId = `${household.$jazz.id}:${me.$jazz.id}`;
+      // Real mode requires GoCardless credentials; demo mode skips token mint.
+      if (!demo) {
+        try {
+          await ensureBankCredsReady(platform.bankData, platform.secrets, connectionId);
+        } catch (err) {
+          if (err instanceof MissingCredentialsError) {
+            setStatus("No GoCardless credentials. Open Settings \u2192 Bank data to add them.");
+            return;
+          }
+          throw err;
+        }
+      }
       const req = await platform.bankData.createRequisition(connectionId, {
         institutionId: which,
         redirectUrl: "resonable://oauth/callback",
