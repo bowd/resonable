@@ -20,6 +20,78 @@ import {
   rejectSuggestion,
 } from "../data/bindings";
 
+type Filters = {
+  query: string;
+  categoryId: string;
+  accountId: string;
+  sign: "" | "debit" | "credit";
+  from: string;
+  to: string;
+};
+
+function matchesFilters(tx: Transaction, effectiveCat: string | undefined, f: Filters): boolean {
+  if (f.categoryId === "__none__" && effectiveCat) return false;
+  if (f.categoryId && f.categoryId !== "__none__" && effectiveCat !== f.categoryId) return false;
+  if (f.accountId && tx.accountId !== f.accountId) return false;
+  if (f.sign === "debit" && tx.amountMinor >= 0) return false;
+  if (f.sign === "credit" && tx.amountMinor < 0) return false;
+  if (f.from && tx.bookedAt < f.from) return false;
+  if (f.to && tx.bookedAt > f.to + "T23:59:59Z") return false;
+  if (f.query) {
+    const q = f.query.toLowerCase();
+    const hay = `${tx.counterparty ?? ""} ${tx.description}`.toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function FilterBar({
+  value, onChange, categories, accounts, total, shown,
+}: {
+  value: Filters;
+  onChange: (next: Filters) => void;
+  categories: { id: string; name: string }[];
+  accounts: { id: string; name: string }[];
+  total: number;
+  shown: number;
+}) {
+  const set = (partial: Partial<Filters>) => onChange({ ...value, ...partial });
+  const clear = () => onChange({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "" });
+  const active = Boolean(value.query || value.categoryId || value.accountId || value.sign || value.from || value.to);
+
+  return (
+    <div className="card">
+      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(200px, 2fr) repeat(3, minmax(120px, 1fr)) auto auto" }}>
+        <input
+          placeholder="Search counterparty or description"
+          value={value.query}
+          onChange={(e) => set({ query: e.target.value })}
+        />
+        <select value={value.categoryId} onChange={(e) => set({ categoryId: e.target.value })} style={{ width: "auto" }}>
+          <option value="">All categories</option>
+          <option value="__none__">Uncategorized</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={value.accountId} onChange={(e) => set({ accountId: e.target.value })} style={{ width: "auto" }}>
+          <option value="">All accounts</option>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={value.sign} onChange={(e) => set({ sign: e.target.value as Filters["sign"] })} style={{ width: "auto" }}>
+          <option value="">Any sign</option>
+          <option value="debit">Debits</option>
+          <option value="credit">Credits</option>
+        </select>
+        <input type="date" value={value.from} onChange={(e) => set({ from: e.target.value })} />
+        <input type="date" value={value.to} onChange={(e) => set({ to: e.target.value })} />
+      </div>
+      <div className="muted" style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>{shown} of {total} transactions</span>
+        {active && <button onClick={clear}>Clear filters</button>}
+      </div>
+    </div>
+  );
+}
+
 export function TransactionsView() {
   const { me } = useAccount();
   const firstHousehold = me?.profile?.households?.[0]?.household;
@@ -43,6 +115,21 @@ export function TransactionsView() {
 
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Filters>({ query: "", categoryId: "", accountId: "", sign: "", from: "", to: "" });
+
+  const accountChoices = useMemo(() => {
+    const out: { id: string; name: string }[] = [];
+    for (const a of firstHousehold?.accounts ?? []) {
+      if (!a || a.archived) continue;
+      out.push({ id: a.externalId, name: a.name });
+    }
+    return out;
+  }, [firstHousehold, firstHousehold?.accounts?.length]);
+
+  const filtered = useMemo(
+    () => all.filter(({ tx }) => matchesFilters(tx, effectiveCategoryId(tx), filters)),
+    [all, filters],
+  );
 
   async function runBatch() {
     if (!firstHousehold || !me) return;
@@ -95,8 +182,17 @@ export function TransactionsView() {
         </div>
         {statusMsg && <p className="muted">{statusMsg}</p>}
       </div>
+      <FilterBar
+        value={filters}
+        onChange={setFilters}
+        categories={categories}
+        accounts={accountChoices}
+        total={all.length}
+        shown={filtered.length}
+      />
       {all.length === 0 && <p className="muted">No transactions imported yet.</p>}
-      {all.slice(0, 200).map(({ tx, account }) => (
+      {all.length > 0 && filtered.length === 0 && <p className="muted">No transactions match the filters.</p>}
+      {filtered.slice(0, 200).map(({ tx, account }) => (
         <Row
           key={tx.id}
           tx={tx}
@@ -106,6 +202,9 @@ export function TransactionsView() {
           household={firstHousehold}
         />
       ))}
+      {filtered.length > 200 && (
+        <p className="muted">Showing first 200 of {filtered.length}. Narrow the filters to see the rest.</p>
+      )}
     </>
   );
 
