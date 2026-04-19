@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { JazzApp } from "./jazz";
+import type { ResonableAccount } from "@resonable/schema";
+import { JazzApp, useCurrentAccount, useFirstHousehold } from "./jazz";
 import { platform } from "./platform";
 import { HouseholdView } from "./views/Household";
 import { AccountsView } from "./views/Accounts";
@@ -12,6 +13,7 @@ import { RulesView } from "./views/Rules";
 import { ImportView } from "./views/Import";
 import { ModerationView } from "./views/Moderation";
 import { SettingsView } from "./views/Settings";
+import { Onboarding, type OnboardingNavTarget } from "./views/Onboarding";
 
 type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "tags" | "rules" | "import" | "moderation" | "settings";
 
@@ -24,7 +26,24 @@ export function App() {
 }
 
 function Shell() {
+  const me = useCurrentAccount();
+  const { household } = useFirstHousehold();
   const [tab, setTab] = useState<Tab>("dashboard");
+
+  // Gate the whole app on first-run: if the account has loaded and has no
+  // household, show onboarding *instead* of the sidebar so nothing leaks
+  // through (empty Dashboard, Accounts nags about no household, etc.).
+  if (me.$isLoaded && !household) {
+    return (
+      <Onboarding
+        me={me as ResonableAccount}
+        onDone={(landing: OnboardingNavTarget) => {
+          setTab(landing);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
