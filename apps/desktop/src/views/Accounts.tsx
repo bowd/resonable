@@ -50,6 +50,7 @@ function savePending(list: PendingRequisition[]) {
 
 export function AccountsView() {
   const { household } = useFirstHousehold();
+  const [showArchived, setShowArchived] = useState(false);
 
   if (!household) {
     return (
@@ -61,6 +62,8 @@ export function AccountsView() {
   }
 
   const accounts = household.accounts as unknown as ReadonlyArray<LoadedAccount>;
+  const live = accounts.filter((a) => a && !a.archived);
+  const archived = accounts.filter((a) => a && a.archived);
 
   return (
     <>
@@ -70,9 +73,23 @@ export function AccountsView() {
         GoCardless credentials. Transactions replicate to every household
         member via the shared Group.
       </p>
-      {accounts.map((acc, i) => acc ? (
-        <AccountCard key={i} account={acc} household={household} />
-      ) : null)}
+      {archived.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <button
+            onClick={() => setShowArchived((v) => !v)}
+            style={{ fontSize: 12 }}
+          >
+            {showArchived ? "Hide" : "Show"} archived ({archived.length})
+          </button>
+        </div>
+      )}
+      {live.map((acc, i) => (
+        <AccountCard key={`live-${i}`} account={acc} household={household} />
+      ))}
+      {showArchived &&
+        archived.map((acc, i) => (
+          <AccountCard key={`arch-${i}`} account={acc} household={household} />
+        ))}
       <LinkBankForm household={household} />
     </>
   );
@@ -103,19 +120,33 @@ function AccountCard({ account, household }: { account: LoadedAccount; household
     }
   }
 
+  function toggleArchive() {
+    account.$jazz.set("archived", !account.archived);
+  }
+
+  const archived = account.archived;
+
   return (
-    <div className="card">
+    <div className="card" style={archived ? { opacity: 0.55 } : undefined}>
       <div className="row">
         <div>
           <strong>{account.name}</strong>
           <span className="pill">{account.currency}</span>
+          {archived && <span className="pill" style={{ marginLeft: 4 }}>archived</span>}
           <div className="muted">{account.institutionName} \u2022 {account.iban ?? "\u2014"}</div>
         </div>
-        <div style={{ textAlign: "right" }}>
+        <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
           <div className="muted">{account.transactions.length} tx</div>
-          <button onClick={resync} disabled={busy} className="primary" style={{ marginTop: 4, fontSize: 12 }}>
-            {busy ? "syncing\u2026" : "Sync"}
-          </button>
+          <div style={{ display: "flex", gap: 6 }}>
+            {!archived && (
+              <button onClick={resync} disabled={busy} className="primary" style={{ fontSize: 12 }}>
+                {busy ? "syncing\u2026" : "Sync"}
+              </button>
+            )}
+            <button onClick={toggleArchive} style={{ fontSize: 12 }}>
+              {archived ? "Unarchive" : "Archive"}
+            </button>
+          </div>
           {msg && <div className="muted" style={{ marginTop: 4 }}>{msg}</div>}
         </div>
       </div>
