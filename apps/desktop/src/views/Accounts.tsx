@@ -1,9 +1,53 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Group } from "jazz-tools";
 import { Account, Household } from "@resonable/schema";
 import { useAccount } from "../jazz";
 import { fixtureBank, platform } from "../platform";
 import { importAccountForConnection, syncAccount } from "../data/import";
+
+type PendingRequisition = {
+  requisitionId: string;
+  connectionId: string;
+  institutionId: "REVOLUT_REVOLT21" | "N26_NTSBDEB1";
+  institutionName: string;
+  link: string;
+  startedAt: string;
+  lastStatus?: string;
+  lastError?: string;
+};
+
+const PENDING_STORAGE_KEY = "resonable.pending-requisitions";
+const POLL_INTERVAL_MS = 5_000;
+const TIMEOUT_MS = 10 * 60 * 1000;
+
+function loadPending(): PendingRequisition[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(PENDING_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p): p is PendingRequisition =>
+      !!p && typeof p === "object" &&
+      typeof (p as PendingRequisition).requisitionId === "string" &&
+      typeof (p as PendingRequisition).connectionId === "string" &&
+      typeof (p as PendingRequisition).institutionName === "string" &&
+      typeof (p as PendingRequisition).link === "string" &&
+      typeof (p as PendingRequisition).startedAt === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function savePending(list: PendingRequisition[]) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    // best effort
+  }
+}
 
 export function AccountsView() {
   const { me } = useAccount();
@@ -84,7 +128,72 @@ function LinkBankForm({ household }: { household: Household }) {
   const [country, setCountry] = useState("AT");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingRequisition[]>(() => loadPending());
+  const pendingRef = useRef<PendingRequisition[]>(pending);
+  const [now, setNow] = useState<number>(() => Date.now());
   const demo = fixtureBank();
+
+  // Keep ref in sync and persist every change.
+  useEffect(() => {
+    pendingRef.current = pending;
+    savePending(pending);
+  }, [pending]);
+
+  // 1Hz clock for elapsed-time rendering.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 5s poll loop for pending requisitions.
+  useEffect(() => {
+    if (!me) return;
+    const tick = async () => {
+      const list = pendingRef.current;
+      if (list.length === 0) return;
+      for (const entry of list) {
+        const age = Date.now() - new Date(entry.startedAt).getTime();
+        if (age >= TIMEOUT_MS) continue; // stop auto-polling once timed out
+        await checkRequisition(entry, /*manual*/ false);
+      }
+    };
+    const id = setInterval(() => { void tick(); }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id]);
+
+  function updatePending(requisitionId: string, patch: Partial<PendingRequisition>) {
+    setPending((prev) => prev.map((p) => p.requisitionId === requisitionId ? { ...p, ...patch } : p));
+  }
+
+  function removePending(requisitionId: string) {
+    setPending((prev) => prev.filter((p) => p.requisitionId !== requisitionId));
+  }
+
+  async function checkRequisition(entry: PendingRequisition, _manual: boolean) {
+    if (!me) return;
+    try {
+      const res = await platform.bankData.getRequisition(entry.connectionId, entry.requisitionId);
+      if (res.status === "LN") {
+        const group = household._owner.castAs(Group);
+        const accounts = await importAccountForConnection({
+          bank: platform.bankData,
+          connectionId: entry.connectionId,
+          requisitionId: entry.requisitionId,
+          household,
+          group,
+          meAccountId: me.id,
+          institutionName: entry.institutionName,
+        });
+        removePending(entry.requisitionId);
+        setStatus(`Linked ${accounts.length} account(s) from ${entry.institutionName}.`);
+        return;
+      }
+      updatePending(entry.requisitionId, { lastStatus: res.status, lastError: undefined });
+    } catch (err) {
+      updatePending(entry.requisitionId, { lastError: (err as Error).message });
+    }
+  }
 
   async function linkBank(which: "REVOLUT_REVOLT21" | "N26_NTSBDEB1") {
     if (!me) return;
@@ -97,8 +206,21 @@ function LinkBankForm({ household }: { household: Household }) {
         redirectUrl: "resonable://oauth/callback",
         reference: connectionId,
       });
+      const institutionName = which.startsWith("REVOLUT") ? "Revolut" : "N26";
       if (!demo) {
-        setStatus(`Open ${req.link} in a browser to consent, then click Finish below.`);
+        const entry: PendingRequisition = {
+          requisitionId: req.id,
+          connectionId,
+          institutionId: which,
+          institutionName,
+          link: req.link,
+          startedAt: new Date().toISOString(),
+        };
+        setPending((prev) => [...prev.filter((p) => p.requisitionId !== entry.requisitionId), entry]);
+        if (typeof window !== "undefined") {
+          window.open(req.link, "_blank", "noopener,noreferrer");
+        }
+        setStatus(`Opened consent page for ${institutionName}. Waiting for consent\u2026`);
         return;
       }
       // Fixture mode: skip consent, go straight to materialization.
@@ -109,7 +231,7 @@ function LinkBankForm({ household }: { household: Household }) {
         household,
         group,
         meAccountId: me.id,
-        institutionName: which.startsWith("REVOLUT") ? "Revolut" : "N26",
+        institutionName,
         accountMeta: (id) => demo.accountMeta(id),
       });
       setStatus(`Linked ${accounts.length} account(s) with fixture data.`);
@@ -139,6 +261,72 @@ function LinkBankForm({ household }: { household: Household }) {
         </button>
       </div>
       {status && <p className="muted" style={{ marginTop: 8 }}>{status}</p>}
+      {pending.map((p) => (
+        <PendingRequisitionCard
+          key={p.requisitionId}
+          entry={p}
+          now={now}
+          onCheck={() => { void checkRequisition(p, true); }}
+          onReopen={() => {
+            if (typeof window !== "undefined") {
+              window.open(p.link, "_blank", "noopener,noreferrer");
+            }
+          }}
+          onCancel={() => removePending(p.requisitionId)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PendingRequisitionCard(props: {
+  entry: PendingRequisition;
+  now: number;
+  onCheck: () => void;
+  onReopen: () => void;
+  onCancel: () => void;
+}) {
+  const { entry, now, onCheck, onReopen, onCancel } = props;
+  const started = new Date(entry.startedAt).getTime();
+  const elapsedMs = Math.max(0, now - started);
+  const timedOut = elapsedMs >= TIMEOUT_MS;
+  const seconds = Math.floor(elapsedMs / 1000);
+  const mm = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const ss = (seconds % 60).toString().padStart(2, "0");
+
+  const terminalError =
+    entry.lastStatus === "RJ" || entry.lastStatus === "EX"
+      ? `Consent ${entry.lastStatus === "RJ" ? "rejected" : "expired"} (${entry.lastStatus}). Cancel and try again.`
+      : null;
+
+  return (
+    <div className="card" style={{ marginTop: 8 }}>
+      <div className="row">
+        <div>
+          <strong>{entry.institutionName}</strong>
+          <span className="pill">waiting for consent</span>
+          <div className="muted">
+            elapsed {mm}:{ss}
+            {entry.lastStatus ? ` \u2022 status ${entry.lastStatus}` : ""}
+          </div>
+          {timedOut && !terminalError && (
+            <div className="muted" style={{ marginTop: 4 }}>
+              timed out \u2014 click Check now to retry
+            </div>
+          )}
+          {terminalError && (
+            <div className="muted" style={{ marginTop: 4 }}>{terminalError}</div>
+          )}
+          {entry.lastError && (
+            <div className="muted" style={{ marginTop: 4 }}>Error: {entry.lastError}</div>
+          )}
+        </div>
+        <div style={{ textAlign: "right", display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button onClick={onReopen} style={{ fontSize: 12 }}>Reopen consent page</button>
+          <button onClick={onCheck} className="primary" style={{ fontSize: 12 }}>Check now</button>
+          <button onClick={onCancel} style={{ fontSize: 12 }}>Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
