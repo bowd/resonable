@@ -1,6 +1,6 @@
 [package]
 name = "resonable-desktop"
-version = "0.0.0"
+version = "0.0.1"
 description = "Resonable local-first expense tracker desktop shell"
 authors = ["Resonable"]
 license = "MIT"
