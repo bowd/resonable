@@ -14,8 +14,24 @@ import { ImportView } from "./views/Import";
 import { ModerationView } from "./views/Moderation";
 import { SettingsView } from "./views/Settings";
 import { Onboarding, type OnboardingNavTarget } from "./views/Onboarding";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { LoadingGate } from "./components/LoadingGate";
 
 type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "tags" | "rules" | "import" | "moderation" | "settings";
+
+const TAB_LABELS: Record<Tab, string> = {
+  dashboard: "Dashboard",
+  household: "Household",
+  accounts: "Accounts",
+  transactions: "Transactions",
+  clusters: "Clusters",
+  categories: "Categories",
+  tags: "Tags",
+  rules: "Rules",
+  import: "CSV import",
+  moderation: "Moderation",
+  settings: "Settings",
+};
 
 export function App() {
   return (
@@ -72,17 +88,21 @@ function Shell() {
         </nav>
       </aside>
       <main>
-        {tab === "dashboard" && <DashboardView />}
-        {tab === "household" && <HouseholdView />}
-        {tab === "accounts" && <AccountsView />}
-        {tab === "transactions" && <TransactionsView />}
-        {tab === "clusters" && <ClustersView />}
-        {tab === "categories" && <CategoriesView />}
-        {tab === "tags" && <TagsView />}
-        {tab === "rules" && <RulesView />}
-        {tab === "import" && <ImportView />}
-        {tab === "moderation" && <ModerationView />}
-        {tab === "settings" && <SettingsView />}
+        <ErrorBoundary name={TAB_LABELS[tab]} key={tab}>
+          <LoadingGate>
+            {tab === "dashboard" && <DashboardView />}
+            {tab === "household" && <HouseholdView />}
+            {tab === "accounts" && <AccountsView />}
+            {tab === "transactions" && <TransactionsView />}
+            {tab === "clusters" && <ClustersView />}
+            {tab === "categories" && <CategoriesView />}
+            {tab === "tags" && <TagsView />}
+            {tab === "rules" && <RulesView />}
+            {tab === "import" && <ImportView />}
+            {tab === "moderation" && <ModerationView />}
+            {tab === "settings" && <SettingsView />}
+          </LoadingGate>
+        </ErrorBoundary>
       </main>
     </div>
   );
