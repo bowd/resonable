@@ -1,121 +1,173 @@
-import { expect, test } from "@playwright/test";
-import { bootstrapDemo, newStagehand } from "./lib/app";
+import { expect, test, type Page } from "@playwright/test";
+import {
+  bootstrapDemo,
+  completeDemoAuth,
+  completeOnboardingWithFixture,
+  newStagehand,
+} from "./lib/app";
 
 /**
  * Happy-path smoke test for the Resonable desktop app, driven through the Vite
- * dev server in fixture/demo mode. Stagehand's natural-language `.act()` is
- * used for the parts where DOM churn is most likely (auth prompt + tab
- * navigation); strict Playwright assertions cover the invariants we care about
- * semantically (row count, category name, dashboard total).
+ * dev server in fixture/demo mode.
  *
- * When `ANTHROPIC_API_KEY` is absent, the Stagehand wrapper is disabled and
- * the test falls back to plain Playwright selectors end-to-end.
+ * Invariants exercised (all with strict Playwright assertions):
+ *   1. Demo auth completes with a chosen display name.
+ *   2. Three-step onboarding reaches the dashboard via "Load fixture data".
+ *   3. Dashboard's "Total spend" StatCard renders a non-zero numeric value.
+ *   4. Accounts tab shows the Revolut + N26 fixture institutions.
+ *   5. Transactions tab carries at least one Netflix row already labeled as
+ *      "Subscriptions" (the starter "Streaming subscriptions" rule should
+ *      fire automatically during first import).
+ *   6. CSV import and Settings > Backup views render without crashing.
+ *
+ * Stagehand's natural-language `.act()` is reserved for steps where DOM churn
+ * is most likely (the jazz-tools auth prompt + sidebar nav); strict Playwright
+ * assertions cover every *semantic* invariant we care about. When
+ * `ANTHROPIC_API_KEY` is absent, `newStagehand` returns `ai: false` and every
+ * step falls back to pure Playwright selectors.
  */
-test("happy path: auth -> household -> link bank -> classify -> dashboard", async ({ page }, testInfo) => {
+test("happy path: onboarding -> fixtures -> dashboard -> transactions", async ({ page }, testInfo) => {
   await bootstrapDemo(page);
   const { stagehand, ai } = await newStagehand(page, testInfo);
 
   await page.goto("/");
 
-  // 1. DemoAuthBasicUI prompts for a display name on first launch. Its exact
-  //    DOM has changed across jazz-react versions, so let Stagehand handle it
-  //    when available; otherwise fall back to the canonical name input + submit.
-  const name = "Test User";
+  // --- 1. Demo auth -------------------------------------------------------
+  const displayName = "Smoke User";
   if (ai) {
     try {
-      await stagehand.act(`In the Resonable sign-in form, type "${name}" into the name field and click the primary continue/sign-up button.`);
+      await stagehand.act(
+        `In the Resonable sign-in form, type "${displayName}" into the "Display name" field and click the "Sign up" submit button.`,
+      );
+      // Stagehand drives a separate browser; we still need to complete auth
+      // on the Playwright-controlled page the rest of the test uses.
+      await completeDemoAuth(page, displayName);
     } catch (err) {
       testInfo.annotations.push({
         type: "stagehand-act-fallback",
         description: `auth flow: ${(err as Error).message}`,
       });
-      await plainAuth(page, name);
+      await completeDemoAuth(page, displayName);
     }
   } else {
-    await plainAuth(page, name);
+    await completeDemoAuth(page, displayName);
   }
 
-  // Sidebar nav renders only after auth completes.
-  await expect(page.getByRole("button", { name: "Dashboard" })).toBeVisible({ timeout: 30_000 });
+  // --- 2. Onboarding with fixture data ------------------------------------
+  await completeOnboardingWithFixture(page, "Smoke Household");
 
-  // 2. Create "Smoke Household".
-  await clickNav(page, "Household");
-  await page.getByRole("button", { name: /new household/i }).click();
-  await page.getByLabel(/household name/i).fill("Smoke Household");
-  await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByText("Smoke Household")).toBeVisible();
+  // Sanity: the sidebar rendered with the household mode pill present.
+  await expect(page.getByRole("heading", { name: /^Resonable/ }))
+    .toBeVisible({ timeout: 15_000 });
 
-  // 3. Accounts tab -> Link Revolut (fixture mode materializes immediately).
+  // --- 3. Dashboard: non-zero Total spend ---------------------------------
+  await clickNav(page, "Dashboard");
+  // Match the exact label text inside the muted <div> rendered by StatCard;
+  // constraining with hasText + a regex anchored at start avoids sub-matches.
+  const spendCard = page
+    .locator(".card", { hasText: /^Total spend/ })
+    .first();
+  await expect(spendCard).toBeVisible({ timeout: 15_000 });
+
+  // Fixture data has plenty of spend, but the value formatting is locale-
+  // dependent (e.g. "€1,234.56" vs "1.234,56 €"). Assert there's at least one
+  // non-zero digit and a EUR indicator — either the € glyph or the ISO code.
+  const spendText = (await spendCard.textContent()) ?? "";
+  expect(spendText, "Total spend card should render a non-zero number").toMatch(/[1-9]/);
+  expect(spendText, "Total spend card should be denominated in EUR").toMatch(/€|EUR/);
+
+  // --- 4. Accounts tab: Revolut + N26 both present ------------------------
   await clickNav(page, "Accounts");
-  await page.getByRole("button", { name: "Link Revolut" }).click();
-  await expect(page.getByText(/Linked \d+ account\(s\) with fixture data\./)).toBeVisible({
-    timeout: 30_000,
-  });
+  // Fixture bootstrap only links Revolut (`REVOLUT_REVOLT21`), which under the
+  // hood exposes accounts labeled "Revolut" and "N26" (multi-institution demo
+  // fixture). Either way, both names should appear as account card text.
+  await expect(
+    page.getByRole("heading", { name: /Accounts in Smoke Household/i }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".card").filter({ hasText: /Revolut/ }).first())
+    .toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".card").filter({ hasText: /N26/ }).first())
+    .toBeVisible({ timeout: 15_000 });
 
-  // 4. Transactions tab -> at least one row, and Netflix is categorized Subscriptions.
+  // --- 5. Transactions tab: Netflix row labeled "Subscriptions" -----------
   await clickNav(page, "Transactions");
-  // The "N of M transactions" footer is the canonical count readout.
-  const counter = page.getByText(/^\d+ of \d+ transactions$/);
+
+  // "N of M transactions" is the canonical count readout from FilterBar.
+  const counter = page.getByText(/^\d+ of \d+ transactions$/).first();
   await expect(counter).toBeVisible({ timeout: 30_000 });
   const counterText = (await counter.textContent()) ?? "";
   const total = Number(counterText.match(/of (\d+) transactions/)?.[1] ?? "0");
-  expect(total).toBeGreaterThan(0);
+  expect(total, "Transaction list should not be empty").toBeGreaterThan(0);
 
-  // Narrow the list to Netflix via the search input, then assert the Row's
-  // embedded <select> shows "Subscriptions" as the picked option (the starter
-  // "Streaming subscriptions" rule applies automatically during import).
+  // Narrow to Netflix via the search input.
   const searchInput = page.getByPlaceholder(/Search counterparty or description/i);
   await searchInput.fill("Netflix");
-  const netflixRow = page.locator(".row", { hasText: /netflix/i }).first();
+
+  // The Row for Netflix contains the counterparty as a <strong>, and its
+  // category <select> has "Subscriptions" as its selected option because the
+  // "Streaming subscriptions" starter rule matches "netflix" during import.
+  const netflixRow = page.locator(".row").filter({ hasText: /netflix/i }).first();
   await expect(netflixRow).toBeVisible({ timeout: 15_000 });
 
-  // Each row contains a category <select>; assert its currently selected label.
-  const netflixCategory = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll(".row")) as HTMLElement[];
-    const match = rows.find((r) => /netflix/i.test(r.textContent ?? ""));
-    if (!match) return null;
-    const sel = match.querySelector("select") as HTMLSelectElement | null;
-    if (!sel) return null;
-    const opt = sel.options[sel.selectedIndex];
-    return opt?.text ?? null;
-  });
-  expect(netflixCategory, "Netflix row should be categorized").toBeTruthy();
-  expect(netflixCategory).toMatch(/subscriptions/i);
+  const netflixCategory = await firstRowSelectedCategory(page, /netflix/i);
+  expect(netflixCategory, "Netflix row should be categorized").not.toBeNull();
+  expect(netflixCategory ?? "").toMatch(/subscriptions/i);
 
-  // 5. Dashboard: total spend is non-zero. Format is locale-dependent, so we
-  //    accept any digit run (optionally with a currency glyph or code).
-  await searchInput.fill(""); // clear filter so dashboard re-renders cleanly
-  await clickNav(page, "Dashboard");
-  const spendCard = page.locator(".card", { hasText: /^Total spend/ }).first();
-  await expect(spendCard).toBeVisible({ timeout: 15_000 });
-  const spendText = (await spendCard.textContent()) ?? "";
-  expect(spendText, "Total spend card should render a number").toMatch(/[1-9]/);
+  // Clear search before leaving so the next view renders without residual
+  // filter state.
+  await searchInput.fill("");
+
+  // --- 6. CSV import + Settings > Backup render without crashing ----------
+  await clickNav(page, "CSV import");
+  await expect(
+    page.getByRole("heading", { name: /^Import CSV$/ }),
+  ).toBeVisible({ timeout: 15_000 });
+
+  await clickNav(page, "Settings");
+  await expect(
+    page.getByRole("heading", { name: /^Settings$/ }),
+  ).toBeVisible({ timeout: 15_000 });
+  // The Backup section is rendered as a <strong>Backup</strong> heading inside
+  // a card. getByText with exact:true pins us to the label rather than any
+  // stray "Backup file (.json)" affordance.
+  await expect(page.getByText("Backup", { exact: true })).toBeVisible();
 
   await stagehand.close();
 });
 
 /**
- * Plain-Playwright auth fallback used when Stagehand is disabled. Uses the
- * most stable locators exposed by DemoAuthBasicUI (an input + a "Sign up"
- * button). Kept resilient: tries label match first, input[type=text] second.
+ * Click a sidebar nav button by its visible label. `App.tsx` renders them as
+ * plain `<button>` elements, so the accessible-name match is stable.
  */
-async function plainAuth(page: import("@playwright/test").Page, name: string) {
-  const candidateInput = page
-    .getByLabel(/name|display/i)
-    .or(page.locator("input[type='text']"))
-    .first();
-  await candidateInput.waitFor({ state: "visible", timeout: 30_000 });
-  await candidateInput.fill(name);
-  const submit = page
-    .getByRole("button", { name: /sign ?up|continue|create/i })
-    .first();
-  await submit.click();
+async function clickNav(page: Page, label: string): Promise<void> {
+  await page.getByRole("button", { name: label, exact: true }).click();
 }
 
 /**
- * Click one of the sidebar nav buttons. They render as plain `<button>`s so
- * we address them by accessible name.
+ * Given the Transactions list, return the currently-selected label of the
+ * category <select> inside the first row whose text matches `pattern`.
+ *
+ * Returns `null` when no matching row is found or when the row has no
+ * `<select>` (e.g. pre-import placeholder state). Runs entirely in the page
+ * context so we can read `HTMLSelectElement.selectedOptions[0].text` directly.
  */
-async function clickNav(page: import("@playwright/test").Page, label: string) {
-  await page.getByRole("button", { name: label, exact: true }).click();
+async function firstRowSelectedCategory(
+  page: Page,
+  pattern: RegExp,
+): Promise<string | null> {
+  const source = pattern.source;
+  const flags = pattern.flags;
+  return page.evaluate(
+    ({ source, flags }) => {
+      const re = new RegExp(source, flags);
+      const rows = Array.from(document.querySelectorAll(".row")) as HTMLElement[];
+      const match = rows.find((r) => re.test(r.textContent ?? ""));
+      if (!match) return null;
+      const sel = match.querySelector("select") as HTMLSelectElement | null;
+      if (!sel) return null;
+      const opt = sel.options[sel.selectedIndex];
+      return opt?.text ?? null;
+    },
+    { source, flags },
+  );
 }

@@ -1,5 +1,5 @@
 import type { Page, TestInfo } from "@playwright/test";
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 /**
  * Flip the desktop app into fixture/demo mode before any script runs on the page.
@@ -166,4 +166,69 @@ export function skipWithoutAI(stagehand: StagehandLike): void {
     !stagehand.enabled,
     "Stagehand disabled (set ANTHROPIC_API_KEY to enable AI-driven assertions)",
   );
+}
+
+/**
+ * Complete the DemoAuthBasicUI sign-up prompt. The component (jazz-tools 0.20)
+ * renders a form with an `<input placeholder="Display name" />` and an
+ * `<input type="submit" value="Sign up" />`; we locate both by their canonical
+ * accessible properties and fall through if either one is missing.
+ *
+ * Exposed as a reusable helper so concurrent specs (smoke / invite /
+ * rules-suggest) can share the same auth shortcut without duplicating the
+ * selector logic when jazz-react ships a new basic UI.
+ */
+export async function completeDemoAuth(page: Page, name: string): Promise<void> {
+  const input = page
+    .getByPlaceholder("Display name")
+    .or(page.getByLabel(/name|display/i))
+    .or(page.locator("form input[type='text'], form input:not([type])"))
+    .first();
+  await input.waitFor({ state: "visible", timeout: 30_000 });
+  await input.fill(name);
+
+  const submit = page
+    .locator("input[type='submit'][value='Sign up']")
+    .or(page.getByRole("button", { name: /sign ?up|continue|create/i }))
+    .first();
+  await submit.click();
+}
+
+/**
+ * Walk the first-run onboarding flow in demo/fixture mode:
+ *   Welcome -> Name household -> Load fixture data (demo).
+ *
+ * After the fixture bank materializes its accounts, `Onboarding` calls
+ * `onDone("dashboard")` which flips the app into the main shell; we wait for
+ * the sidebar "Dashboard" nav button to appear so callers can proceed with
+ * post-onboarding assertions immediately.
+ */
+export async function completeOnboardingWithFixture(
+  page: Page,
+  householdName: string,
+): Promise<void> {
+  // Step 1: Welcome card with a primary "Create my household" button.
+  await page
+    .getByRole("button", { name: /create my household/i })
+    .click({ timeout: 30_000 });
+
+  // Step 2: name the household. The input has a real <label for="household-name">.
+  const nameInput = page
+    .getByLabel(/household name/i)
+    .or(page.locator("#household-name"))
+    .first();
+  await nameInput.waitFor({ state: "visible", timeout: 15_000 });
+  await nameInput.fill(householdName);
+  await page.getByRole("button", { name: /create household/i }).click();
+
+  // Step 3: "Load demo bank" materializes the fixture Revolut accounts.
+  const loadDemo = page.getByRole("button", { name: /load demo bank/i });
+  await loadDemo.waitFor({ state: "visible", timeout: 15_000 });
+  await loadDemo.click();
+
+  // Onboarding posts "Loaded N demo account(s)..." then navigates to Dashboard
+  // after ~700ms; the sidebar "Dashboard" nav button is the canonical signal.
+  await expect(
+    page.getByRole("button", { name: "Dashboard", exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
 }
