@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Group } from "jazz-tools";
-import { Category, Household } from "@resonable/schema";
-import { useAccount } from "../jazz";
+import type { LoadedCategory, LoadedHousehold } from "@resonable/schema";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import {
   archiveCategory,
   createCategory,
@@ -12,11 +11,10 @@ import {
 const PALETTE = ["#16a34a", "#f97316", "#2563eb", "#a855f7", "#db2777", "#0891b2", "#059669", "#6b7280", "#dc2626", "#ea580c", "#4f46e5"];
 
 export function CategoriesView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const { household } = useFirstHousehold();
   const [showArchived, setShowArchived] = useState(false);
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Categories</h2>
@@ -25,8 +23,8 @@ export function CategoriesView() {
     );
   }
 
-  const all = firstHousehold.categories ?? [];
-  const visible: Category[] = [];
+  const all = household.categories as unknown as ReadonlyArray<LoadedCategory>;
+  const visible: LoadedCategory[] = [];
   for (const c of all) {
     if (!c) continue;
     if (!showArchived && c.archived) continue;
@@ -41,19 +39,19 @@ export function CategoriesView() {
         reference their ids; archive \u2014 don\u2019t delete \u2014 to keep historical
         labels intact.
       </p>
-      <AddCategoryCard household={firstHousehold} />
+      <AddCategoryCard household={household} />
       <div className="card">
         <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} style={{ width: "auto" }} />
           <span>Show archived</span>
         </label>
       </div>
-      {visible.map((c) => <CategoryRow key={c.id} category={c} />)}
+      {visible.map((c) => <CategoryRow key={c.$jazz.id} category={c} />)}
     </>
   );
 }
 
-function CategoryRow({ category }: { category: Category }) {
+function CategoryRow({ category }: { category: LoadedCategory }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(category.name);
 
@@ -98,7 +96,7 @@ function CategoryRow({ category }: { category: Category }) {
   );
 }
 
-function PalettePicker({ category }: { category: Category }) {
+function PalettePicker({ category }: { category: LoadedCategory }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: "relative" }}>
@@ -126,18 +124,18 @@ function PalettePicker({ category }: { category: Category }) {
   );
 }
 
-function AddCategoryCard({ household }: { household: Household }) {
-  const { me } = useAccount();
+function AddCategoryCard({ household }: { household: LoadedHousehold }) {
+  const me = useCurrentAccount();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState(PALETTE[0]!);
   const [icon, setIcon] = useState("");
 
   function save() {
-    if (!me || !name.trim()) return;
-    const group = household._owner.castAs(Group);
+    if (!me.$isLoaded || !name.trim()) return;
+    const group = household.$jazz.owner;
     createCategory(
-      { household, meAccountId: me.id, group },
+      { household, meAccountId: me.$jazz.id, group },
       { name: name.trim(), color, ...(icon.trim() ? { icon: icon.trim() } : {}) },
     );
     setName(""); setIcon(""); setAdding(false);

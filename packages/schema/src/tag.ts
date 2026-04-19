@@ -1,9 +1,11 @@
-import { CoMap, CoList, co } from "jazz-tools";
+import { co, z } from "jazz-tools";
 
-export class Tag extends CoMap {
-  name = co.string;
-  color = co.string;
-  archived = co.boolean;
-}
+export const Tag = co.map({
+  name: z.string(),
+  color: z.string(),
+  archived: z.boolean(),
+});
+export type Tag = co.loaded<typeof Tag>;
 
-export class TagList extends CoList.Of(co.ref(Tag)) {}
+export const TagList = co.list(Tag);
+export type TagList = co.loaded<typeof TagList>;

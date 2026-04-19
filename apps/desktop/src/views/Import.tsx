@@ -1,13 +1,12 @@
 import { useMemo, useRef, useState } from "react";
-import { Group } from "jazz-tools";
-import { Account } from "@resonable/schema";
+import type { LoadedAccount, LoadedHousehold } from "@resonable/schema";
 import {
   mapCsv,
   parseCsv,
   type CsvColumnMapping,
   type NormalizedTransaction,
 } from "@resonable/core";
-import { useAccount } from "../jazz";
+import { useFirstHousehold } from "../jazz";
 import { importCsvToAccount } from "../data/import";
 
 type DateFormat = "iso" | "dmy" | "mdy";
@@ -46,10 +45,9 @@ const ROLE_ORDER: Role[] = [
 ];
 
 export function ImportView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const { household } = useFirstHousehold();
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Import CSV</h2>
@@ -58,8 +56,8 @@ export function ImportView() {
     );
   }
 
-  const accounts: Account[] = [];
-  for (const a of firstHousehold.accounts ?? []) {
+  const accounts: LoadedAccount[] = [];
+  for (const a of household.accounts as unknown as ReadonlyArray<LoadedAccount>) {
     if (a && !a.archived) accounts.push(a);
   }
 
@@ -82,12 +80,12 @@ export function ImportView() {
         Paste or upload a CSV exported from a bank that isn&apos;t supported by
         GoCardless. Parsing happens entirely in this tab \u2014 nothing is uploaded.
       </p>
-      <ImportFlow household={firstHousehold} accounts={accounts} />
+      <ImportFlow household={household} accounts={accounts} />
     </>
   );
 }
 
-function ImportFlow(props: { household: { id: string; _owner: { castAs: (c: typeof Group) => Group } }; accounts: Account[] }) {
+function ImportFlow(props: { household: LoadedHousehold; accounts: LoadedAccount[] }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [rows, setRows] = useState<string[][] | null>(null);
@@ -96,7 +94,7 @@ function ImportFlow(props: { household: { id: string; _owner: { castAs: (c: type
   const [dateFormat, setDateFormat] = useState<DateFormat>("iso");
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [roles, setRoles] = useState<Role[]>([]);
-  const [targetAccountId, setTargetAccountId] = useState<string>(props.accounts[0]!.id);
+  const [targetAccountId, setTargetAccountId] = useState<string>(props.accounts[0]!.$jazz.id);
   const [result, setResult] = useState<null | {
     before: number;
     after: number;
@@ -172,19 +170,19 @@ function ImportFlow(props: { household: { id: string; _owner: { castAs: (c: type
 
   async function onImport() {
     if (!mapResult || !mapping) return;
-    const account = props.accounts.find((a) => a.id === targetAccountId);
+    const account = props.accounts.find((a) => a.$jazz.id === targetAccountId);
     if (!account) return;
     setImporting(true);
     setImportErr(null);
     try {
-      const before = account.transactions?.length ?? 0;
-      const group = props.household._owner.castAs(Group);
+      const before = account.transactions.length;
+      const group = props.household.$jazz.owner;
       const { added, skipped } = importCsvToAccount(
         account,
         mapResult.transactions,
         group,
       );
-      const after = account.transactions?.length ?? before + added.length;
+      const after = account.transactions.length;
       setResult({
         before,
         after,
@@ -362,7 +360,7 @@ function ImportFlow(props: { household: { id: string; _owner: { castAs: (c: type
                 onChange={(e) => setTargetAccountId(e.target.value)}
               >
                 {props.accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
+                  <option key={a.$jazz.id} value={a.$jazz.id}>
                     {a.name} ({a.institutionName})
                   </option>
                 ))}

@@ -1,11 +1,15 @@
-import { CoMap, CoList, co } from "jazz-tools";
+import { co, z } from "jazz-tools";
 
-export class Category extends CoMap {
-  name = co.string;
-  color = co.string;
-  icon = co.optional.string;
-  parent = co.optional.ref(Category);
-  archived = co.boolean;
-}
+export const Category = co.map({
+  name: z.string(),
+  color: z.string(),
+  icon: z.optional(z.string()),
+  get parent(): co.Optional<typeof Category> {
+    return co.optional(Category);
+  },
+  archived: z.boolean(),
+});
+export type Category = co.loaded<typeof Category>;
 
-export class CategoryList extends CoList.Of(co.ref(Category)) {}
+export const CategoryList = co.list(Category);
+export type CategoryList = co.loaded<typeof CategoryList>;

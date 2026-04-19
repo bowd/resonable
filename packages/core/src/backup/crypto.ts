@@ -102,13 +102,17 @@ function randomBytes(n: number): Uint8Array {
   return buf;
 }
 
+declare const Buffer: undefined | {
+  from(input: Uint8Array | string, encoding?: "base64"): { toString(enc: "base64"): string; [Symbol.iterator](): IterableIterator<number> };
+};
+
 function toBase64(bytes: Uint8Array): string {
   if (typeof btoa === "function") {
     let s = "";
     for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
     return btoa(s);
   }
-  return Buffer.from(bytes).toString("base64");
+  return Buffer!.from(bytes).toString("base64");
 }
 
 function fromBase64(b64: string): Uint8Array {
@@ -118,7 +122,7 @@ function fromBase64(b64: string): Uint8Array {
     for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
     return out;
   }
-  return new Uint8Array(Buffer.from(b64, "base64"));
+  return new Uint8Array(Buffer!.from(b64, "base64") as unknown as Iterable<number>);
 }
 
 export const _textCodec = { encode: (s: string) => ENC.encode(s), decode: (b: Uint8Array) => DEC.decode(b) };

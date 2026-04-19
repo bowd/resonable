@@ -1,31 +1,24 @@
 import { useMemo, useState } from "react";
-import { Group } from "jazz-tools";
 import { canRevokeLabel } from "@resonable/core";
-import { useAccount } from "../jazz";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import { readAllLabels, revokeLabel, type LabelRow } from "../data/bindings";
 
 export function ModerationView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const me = useCurrentAccount();
+  const { household } = useFirstHousehold();
   const [filter, setFilter] = useState<string>("");
   const [showRevoked, setShowRevoked] = useState(false);
 
   const myRole = useMemo(() => {
-    if (!firstHousehold) return undefined;
-    const group = firstHousehold._owner.castAs(Group);
-    const r = group.myRole();
+    if (!household) return undefined;
+    const r = household.$jazz.owner.myRole();
     if (r === "reader" || r === "writer" || r === "admin") return r;
     return "reader";
-  }, [firstHousehold]);
+  }, [household]);
 
   const rows = useMemo(
-    () => (firstHousehold ? readAllLabels(firstHousehold) : []),
-    [
-      firstHousehold,
-      firstHousehold?.accounts?.flatMap((a) =>
-        (a?.transactions ?? []).map((t) => t?.labels?.length ?? 0).join("."),
-      ).join(","),
-    ],
+    () => (household ? readAllLabels(household) : []),
+    [household],
   );
 
   const authorStats = useMemo(() => {
@@ -50,7 +43,7 @@ export function ModerationView() {
     return true;
   });
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Moderation</h2>
@@ -109,7 +102,7 @@ export function ModerationView() {
       </div>
       {filtered.length === 0 && <p className="muted">No labels match.</p>}
       {filtered.slice(0, 200).map((row, i) => (
-        <LabelLine key={i} row={row} myRole={myRole} meAccountId={me?.id ?? ""} />
+        <LabelLine key={i} row={row} myRole={myRole} meAccountId={me.$isLoaded ? me.$jazz.id : ""} />
       ))}
     </>
   );

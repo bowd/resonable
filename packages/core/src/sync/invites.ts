@@ -11,11 +11,17 @@ export type InvitePayload = {
   expiresAt: number;
 };
 
+// Reference Buffer without triggering the TS "Cannot find name 'Buffer'" error when
+// the consuming project (e.g. desktop) doesn't include @types/node.
+declare const Buffer: undefined | {
+  from(input: string, encoding: "utf8" | "base64"): { toString(encoding: "utf8" | "base64"): string };
+};
+
 export function encodeInvite(payload: InvitePayload): string {
   const json = JSON.stringify(payload);
   const b64 = typeof btoa === "function"
     ? btoa(unescape(encodeURIComponent(json)))
-    : Buffer.from(json, "utf8").toString("base64");
+    : Buffer!.from(json, "utf8").toString("base64");
   return `resonable-invite:${b64}`;
 }
 
@@ -25,7 +31,7 @@ export function decodeInvite(encoded: string): InvitePayload {
   const b64 = encoded.slice(prefix.length);
   const json = typeof atob === "function"
     ? decodeURIComponent(escape(atob(b64)))
-    : Buffer.from(b64, "base64").toString("utf8");
+    : Buffer!.from(b64, "base64").toString("utf8");
   const parsed = JSON.parse(json) as InvitePayload;
   if (parsed.version !== 1) throw new Error("unsupported invite version");
   if (typeof parsed.expiresAt !== "number") throw new Error("invalid expiresAt");

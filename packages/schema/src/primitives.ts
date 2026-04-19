@@ -1,9 +1,10 @@
-import { CoMap, co } from "jazz-tools";
+import { co, z } from "jazz-tools";
 
-export class Money extends CoMap {
-  amountMinor = co.number;
-  currency = co.string;
-}
+export const Money = co.map({
+  amountMinor: z.number(),
+  currency: z.string(),
+});
+export type Money = co.loaded<typeof Money>;
 
 export const SyncStatus = ["idle", "syncing", "error", "expired"] as const;
 export type SyncStatusT = (typeof SyncStatus)[number];
