@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Group } from "jazz-tools";
-import { Household, Tag } from "@resonable/schema";
-import { useAccount } from "../jazz";
+import type { LoadedHousehold, LoadedTag } from "@resonable/schema";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import {
   archiveTag,
   createTag,
@@ -12,11 +11,10 @@ import {
 const PALETTE = ["#16a34a", "#f97316", "#2563eb", "#a855f7", "#db2777", "#0891b2", "#059669", "#6b7280", "#dc2626", "#ea580c", "#4f46e5"];
 
 export function TagsView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const { household } = useFirstHousehold();
   const [showArchived, setShowArchived] = useState(false);
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Tags</h2>
@@ -25,8 +23,8 @@ export function TagsView() {
     );
   }
 
-  const visible: Tag[] = [];
-  for (const t of firstHousehold.tags ?? []) {
+  const visible: LoadedTag[] = [];
+  for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
     if (!t) continue;
     if (!showArchived && t.archived) continue;
     visible.push(t);
@@ -39,7 +37,7 @@ export function TagsView() {
         Tags are append-only overlays on transactions. Each tag event (add or
         remove) is attributed to a member, so moderation can audit or revoke.
       </p>
-      <AddTagCard household={firstHousehold} />
+      <AddTagCard household={household} />
       <div className="card">
         <label style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} style={{ width: "auto" }} />
@@ -47,12 +45,12 @@ export function TagsView() {
         </label>
       </div>
       {visible.length === 0 && <p className="muted">No tags yet.</p>}
-      {visible.map((t) => <TagRow key={t.id} tag={t} />)}
+      {visible.map((t) => <TagRow key={t.$jazz.id} tag={t} />)}
     </>
   );
 }
 
-function TagRow({ tag }: { tag: Tag }) {
+function TagRow({ tag }: { tag: LoadedTag }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(tag.name);
 
@@ -89,7 +87,7 @@ function TagRow({ tag }: { tag: Tag }) {
   );
 }
 
-function ColorPicker({ tag }: { tag: Tag }) {
+function ColorPicker({ tag }: { tag: LoadedTag }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: "relative" }}>
@@ -110,17 +108,17 @@ function ColorPicker({ tag }: { tag: Tag }) {
   );
 }
 
-function AddTagCard({ household }: { household: Household }) {
-  const { me } = useAccount();
+function AddTagCard({ household }: { household: LoadedHousehold }) {
+  const me = useCurrentAccount();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState(PALETTE[0]!);
 
   function save() {
-    if (!me || !name.trim()) return;
-    const group = household._owner.castAs(Group);
+    if (!me.$isLoaded || !name.trim()) return;
+    const group = household.$jazz.owner;
     createTag(
-      { household, meAccountId: me.id, group },
+      { household, meAccountId: me.$jazz.id, group },
       { name: name.trim(), color },
     );
     setName(""); setAdding(false);

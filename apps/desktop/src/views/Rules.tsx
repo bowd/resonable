@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Group } from "jazz-tools";
 import {
   parseRuleSpec,
   suggestRules,
@@ -7,32 +6,42 @@ import {
   type RuleProposal,
   type RuleSpec,
 } from "@resonable/core";
-import { Household, Rule } from "@resonable/schema";
-import { useAccount } from "../jazz";
+import type { LoadedCategory, LoadedHousehold, LoadedRule, LoadedTag } from "@resonable/schema";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import { platform } from "../platform";
 import { createRule, readLabeledTransactions } from "../data/bindings";
 import { RuleBuilder } from "./RuleBuilder";
 
 export function RulesView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
-  const rules = firstHousehold?.rules ?? [];
+  const { household } = useFirstHousehold();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const rules = (household?.rules as unknown as ReadonlyArray<LoadedRule> | undefined) ?? [];
+
   const categories = useMemo(
-    () =>
-      (firstHousehold?.categories ?? [])
-        .filter((c) => Boolean(c) && !c!.archived)
-        .map((c) => ({ id: c!.id, name: c!.name })),
-    [firstHousehold],
+    () => {
+      if (!household) return [];
+      const out: { id: string; name: string }[] = [];
+      for (const c of household.categories as unknown as ReadonlyArray<LoadedCategory>) {
+        if (!c || c.archived) continue;
+        out.push({ id: c.$jazz.id, name: c.name });
+      }
+      return out;
+    },
+    [household],
   );
   const tags = useMemo(
-    () =>
-      (firstHousehold?.tags ?? [])
-        .filter((t) => Boolean(t) && !t!.archived)
-        .map((t) => ({ id: t!.id, name: t!.name, color: t!.color })),
-    [firstHousehold],
+    () => {
+      if (!household) return [];
+      const out: { id: string; name: string; color: string }[] = [];
+      for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
+        if (!t || t.archived) continue;
+        out.push({ id: t.$jazz.id, name: t.name, color: t.color });
+      }
+      return out;
+    },
+    [household],
   );
 
   return (
@@ -42,10 +51,10 @@ export function RulesView() {
         Deterministic rules applied before any LLM call. User-authored rules are
         prioritized over derived ones. Disable a rule to audit its behavior.
       </p>
-      {firstHousehold && <SuggestPanel household={firstHousehold} />}
+      {household && <SuggestPanel household={household} />}
       <div className="card">
-        {adding && firstHousehold ? (
-          <AddRuleForm household={firstHousehold} onDone={() => setAdding(false)} />
+        {adding && household ? (
+          <AddRuleForm household={household} onDone={() => setAdding(false)} />
         ) : (
           <button className="primary" onClick={() => setAdding(true)}>+ Add rule</button>
         )}
@@ -53,7 +62,7 @@ export function RulesView() {
       {rules.length === 0 && <p className="muted">No rules yet.</p>}
       {rules.map((r, i) => r ? (
         <div className="card" key={i}>
-          {editingId === r.id ? (
+          {editingId === r.$jazz.id ? (
             <EditRuleForm
               rule={r}
               categories={categories}
@@ -79,8 +88,8 @@ export function RulesView() {
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setEditingId(r.id)}>Edit</button>
-                  <button onClick={() => r.enabled = !r.enabled}>
+                  <button onClick={() => setEditingId(r.$jazz.id)}>Edit</button>
+                  <button onClick={() => r.$jazz.set("enabled", !r.enabled)}>
                     {r.enabled ? "Disable" : "Enable"}
                   </button>
                 </div>
@@ -97,8 +106,8 @@ export function RulesView() {
   );
 }
 
-function SuggestPanel({ household }: { household: Household }) {
-  const { me } = useAccount();
+function SuggestPanel({ household }: { household: LoadedHousehold }) {
+  const me = useCurrentAccount();
   const [busy, setBusy] = useState(false);
   const [proposals, setProposals] = useState<RuleProposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,13 +131,16 @@ function SuggestPanel({ household }: { household: Household }) {
   }
 
   function accept(p: RuleProposal) {
-    if (!me) return;
-    const group = household._owner.castAs(Group);
-    const category = (household.categories ?? []).find((c) => c?.id === p.categoryId);
+    if (!me.$isLoaded) return;
+    const group = household.$jazz.owner;
+    let categoryName = p.categoryId;
+    for (const c of household.categories as unknown as ReadonlyArray<LoadedCategory>) {
+      if (c?.$jazz.id === p.categoryId) { categoryName = c.name; break; }
+    }
     createRule(
-      { household, meAccountId: me.id, group },
+      { household, meAccountId: me.$jazz.id, group },
       {
-        name: `Auto: ${category?.name ?? p.categoryId}`,
+        name: `Auto: ${categoryName}`,
         specJson: JSON.stringify(p.spec),
         source: p.source === "heuristic" ? "derived" : "llm",
         confidence: p.source === "llm" ? 0.7 : 0.9,
@@ -170,22 +182,26 @@ function SuggestPanel({ household }: { household: Household }) {
   );
 }
 
-function AddRuleForm({ household, onDone }: { household: Household; onDone: () => void }) {
-  const { me } = useAccount();
+function AddRuleForm({ household, onDone }: { household: LoadedHousehold; onDone: () => void }) {
+  const me = useCurrentAccount();
   const [name, setName] = useState("");
   const [spec, setSpec] = useState<RuleSpec | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const categories = (household.categories ?? [])
-    .filter((c) => Boolean(c) && !c!.archived)
-    .map((c) => ({ id: c!.id, name: c!.name }));
+  const categories: { id: string; name: string }[] = [];
+  for (const c of household.categories as unknown as ReadonlyArray<LoadedCategory>) {
+    if (!c || c.archived) continue;
+    categories.push({ id: c.$jazz.id, name: c.name });
+  }
 
-  const tags = (household.tags ?? [])
-    .filter((t) => Boolean(t) && !t!.archived)
-    .map((t) => ({ id: t!.id, name: t!.name, color: t!.color }));
+  const tags: { id: string; name: string; color: string }[] = [];
+  for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
+    if (!t || t.archived) continue;
+    tags.push({ id: t.$jazz.id, name: t.name, color: t.color });
+  }
 
   function save() {
-    if (!me || !spec) return;
+    if (!me.$isLoaded || !spec) return;
     setErr(null);
     try {
       validateRuleSpec(spec);
@@ -193,9 +209,9 @@ function AddRuleForm({ household, onDone }: { household: Household; onDone: () =
       setErr((e as Error).message);
       return;
     }
-    const group = household._owner.castAs(Group);
+    const group = household.$jazz.owner;
     createRule(
-      { household, meAccountId: me.id, group },
+      { household, meAccountId: me.$jazz.id, group },
       { name: name || "Untitled", specJson: JSON.stringify(spec), source: "user" },
     );
     onDone();
@@ -221,12 +237,12 @@ function EditRuleForm({
   tags,
   onDone,
 }: {
-  rule: Rule;
+  rule: LoadedRule;
   categories: { id: string; name: string }[];
   tags: { id: string; name: string; color: string }[];
   onDone: () => void;
 }) {
-  const { me } = useAccount();
+  const me = useCurrentAccount();
   const [name, setName] = useState(rule.name);
   const initial = useMemo<RuleSpec | null>(() => {
     try {
@@ -240,7 +256,7 @@ function EditRuleForm({
   const [err, setErr] = useState<string | null>(null);
 
   function save() {
-    if (!me || !spec) return;
+    if (!me.$isLoaded || !spec) return;
     setErr(null);
     let validated: RuleSpec;
     try {
@@ -254,11 +270,11 @@ function EditRuleForm({
       setErr("priority must be an integer");
       return;
     }
-    rule.name = name || "Untitled";
-    rule.specJson = JSON.stringify(validated);
-    rule.priority = parsedPriority;
-    rule.lastEditedByAccountId = me.id;
-    rule.lastEditedAt = new Date().toISOString();
+    rule.$jazz.set("name", name || "Untitled");
+    rule.$jazz.set("specJson", JSON.stringify(validated));
+    rule.$jazz.set("priority", parsedPriority);
+    rule.$jazz.set("lastEditedByAccountId", me.$jazz.id);
+    rule.$jazz.set("lastEditedAt", new Date().toISOString());
     onDone();
   }
 
@@ -283,8 +299,11 @@ function EditRuleForm({
   );
 }
 
-function categoryName(household: Household, id: string): string {
-  return (household.categories ?? []).find((c) => c?.id === id)?.name ?? id;
+function categoryName(household: LoadedHousehold, id: string): string {
+  for (const c of household.categories as unknown as ReadonlyArray<LoadedCategory>) {
+    if (c?.$jazz.id === id) return c.name;
+  }
+  return id;
 }
 
 function safeFormat(json: string): string {

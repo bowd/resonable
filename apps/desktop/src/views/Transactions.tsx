@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Group } from "jazz-tools";
 import {
   exportTransactionsCsv,
   runPipeline,
@@ -7,8 +6,14 @@ import {
   type LabelPlan,
   type SuggestionPlan,
 } from "@resonable/core";
-import { AISuggestion, Transaction } from "@resonable/schema";
-import { useAccount } from "../jazz";
+import type {
+  LoadedAccount,
+  LoadedAISuggestion,
+  LoadedHousehold,
+  LoadedTag,
+  LoadedTransaction,
+} from "@resonable/schema";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import { platform } from "../platform";
 import {
   acceptSuggestion,
@@ -35,7 +40,7 @@ type Filters = {
   tagIds: string[];
 };
 
-function matchesFilters(tx: Transaction, effectiveCat: string | undefined, f: Filters): boolean {
+function matchesFilters(tx: LoadedTransaction, effectiveCat: string | undefined, f: Filters): boolean {
   if (f.categoryId === "__none__" && effectiveCat) return false;
   if (f.categoryId && f.categoryId !== "__none__" && effectiveCat !== f.categoryId) return false;
   if (f.accountId && tx.accountId !== f.accountId) return false;
@@ -132,24 +137,22 @@ function FilterBar({
 }
 
 export function TransactionsView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const me = useCurrentAccount();
+  const { household } = useFirstHousehold();
 
   const compiled = useMemo(
-    () => (firstHousehold ? readCompiledRules(firstHousehold) : []),
-    [firstHousehold, firstHousehold?.rules?.length],
+    () => (household ? readCompiledRules(household) : []),
+    [household],
   );
 
   const categories = useMemo(
-    () => (firstHousehold ? readCategories(firstHousehold) : []),
-    [firstHousehold, firstHousehold?.categories?.length],
+    () => (household ? readCategories(household) : []),
+    [household],
   );
 
   const all = useMemo(
-    () => (firstHousehold ? readAllTransactions(firstHousehold) : []),
-    [firstHousehold,
-     firstHousehold?.accounts?.length,
-     firstHousehold?.accounts?.flatMap((a) => a?.transactions?.length ?? 0).join(",")],
+    () => (household ? readAllTransactions(household) : []),
+    [household],
   );
 
   const [busy, setBusy] = useState(false);
@@ -161,21 +164,23 @@ export function TransactionsView() {
 
   const accountChoices = useMemo(() => {
     const out: { id: string; name: string }[] = [];
-    for (const a of firstHousehold?.accounts ?? []) {
+    if (!household) return out;
+    for (const a of household.accounts as unknown as ReadonlyArray<LoadedAccount>) {
       if (!a || a.archived) continue;
       out.push({ id: a.externalId, name: a.name });
     }
     return out;
-  }, [firstHousehold, firstHousehold?.accounts?.length]);
+  }, [household]);
 
   const tagChoices = useMemo(() => {
     const out: { id: string; name: string; color: string }[] = [];
-    for (const t of firstHousehold?.tags ?? []) {
+    if (!household) return out;
+    for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
       if (!t || t.archived) continue;
-      out.push({ id: t.id, name: t.name, color: t.color });
+      out.push({ id: t.$jazz.id, name: t.name, color: t.color });
     }
     return out;
-  }, [firstHousehold, firstHousehold?.tags?.length]);
+  }, [household]);
 
   const filtered = useMemo(
     () => all.filter(({ tx }) => matchesFilters(tx, effectiveCategoryId(tx), filters)),
@@ -185,14 +190,14 @@ export function TransactionsView() {
   // Keep selection trimmed to ids still visible under current filters so that
   // toggling filters can't leave us acting on invisible rows.
   const visibleSelected = useMemo(() => {
-    const visibleIds = new Set<string>(filtered.map(({ tx }) => tx.id as string));
+    const visibleIds = new Set<string>(filtered.map(({ tx }) => tx.$jazz.id as string));
     const next = new Set<string>();
     for (const id of selected) if (visibleIds.has(id)) next.add(id);
     return next;
   }, [selected, filtered]);
 
   const allVisibleSelected =
-    filtered.length > 0 && filtered.every(({ tx }) => visibleSelected.has(tx.id));
+    filtered.length > 0 && filtered.every(({ tx }) => visibleSelected.has(tx.$jazz.id));
 
   function toggleRow(id: string, on: boolean) {
     setSelected((prev) => {
@@ -206,8 +211,8 @@ export function TransactionsView() {
   function toggleAllVisible(on: boolean) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (on) for (const { tx } of filtered) next.add(tx.id);
-      else for (const { tx } of filtered) next.delete(tx.id);
+      if (on) for (const { tx } of filtered) next.add(tx.$jazz.id);
+      else for (const { tx } of filtered) next.delete(tx.$jazz.id);
       return next;
     });
   }
@@ -217,10 +222,10 @@ export function TransactionsView() {
   }
 
   function applyBulkCategory() {
-    if (!firstHousehold || !me || !bulkCategoryId || visibleSelected.size === 0) return;
-    const group = firstHousehold._owner.castAs(Group);
+    if (!household || !me.$isLoaded || !bulkCategoryId || visibleSelected.size === 0) return;
+    const group = household.$jazz.owner;
     bulkApplyCategory(
-      { household: firstHousehold, meAccountId: me.id, group },
+      { household, meAccountId: me.$jazz.id, group },
       Array.from(visibleSelected),
       bulkCategoryId,
       "user-bulk",
@@ -230,14 +235,14 @@ export function TransactionsView() {
   }
 
   function applyBulkTags() {
-    if (!firstHousehold || !me || bulkTagIds.length === 0 || visibleSelected.size === 0) return;
-    const group = firstHousehold._owner.castAs(Group);
-    const ctx = { household: firstHousehold, meAccountId: me.id, group };
-    const txById = new Map<string, Transaction>();
-    for (const { tx } of filtered) txById.set(tx.id, tx);
-    const findTag = (id: string) => {
-      for (const t of firstHousehold.tags ?? []) {
-        if (t && t.id === id) return t;
+    if (!household || !me.$isLoaded || bulkTagIds.length === 0 || visibleSelected.size === 0) return;
+    const group = household.$jazz.owner;
+    const ctx = { household, meAccountId: me.$jazz.id, group };
+    const txById = new Map<string, LoadedTransaction>();
+    for (const { tx } of filtered) txById.set(tx.$jazz.id, tx);
+    const findTag = (id: string): LoadedTag | undefined => {
+      for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
+        if (t && t.$jazz.id === id) return t;
       }
       return undefined;
     };
@@ -255,17 +260,17 @@ export function TransactionsView() {
   }
 
   function exportSelectedCsv() {
-    if (!firstHousehold || visibleSelected.size === 0) return;
+    if (!household || visibleSelected.size === 0) return;
     const categoryNameById = new Map<string, string>(
       categories.map((c) => [c.id as string, c.name]),
     );
     const tagNameById = new Map<string, string>();
-    for (const t of firstHousehold.tags ?? []) {
-      if (t) tagNameById.set(t.id as string, t.name);
+    for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
+      if (t) tagNameById.set(t.$jazz.id as string, t.name);
     }
     const rows: CsvExportRow[] = [];
     for (const { tx, account } of filtered) {
-      if (!visibleSelected.has(tx.id)) continue;
+      if (!visibleSelected.has(tx.$jazz.id)) continue;
       const catId = effectiveCategoryId(tx);
       const tagIds = effectiveTagIds(tx);
       rows.push({
@@ -294,19 +299,19 @@ export function TransactionsView() {
   }
 
   async function runBatch() {
-    if (!firstHousehold || !me) return;
+    if (!household || !me.$isLoaded) return;
     setBusy(true); setStatusMsg(null);
     try {
-      const group = firstHousehold._owner.castAs(Group);
-      const ctx = { household: firstHousehold, meAccountId: me.id, group };
+      const group = household.$jazz.owner;
+      const ctx = { household, meAccountId: me.$jazz.id, group };
       const toClassify = all
         .filter(({ tx }) => !effectiveCategoryId(tx))
         .map(({ pipelineInput }) => pipelineInput);
       const policy = {
-        newMemberDefaultRole: firstHousehold.newMemberDefaultRole as "reader" | "writer" | "admin",
-        requireAdminForRuleCreate: firstHousehold.requireAdminForRuleCreate,
-        allowLLMAutoApply: firstHousehold.allowLLMAutoApply,
-        autoApplyMinConfidence: firstHousehold.autoApplyMinConfidence,
+        newMemberDefaultRole: household.newMemberDefaultRole as "reader" | "writer" | "admin",
+        requireAdminForRuleCreate: household.requireAdminForRuleCreate,
+        allowLLMAutoApply: household.allowLLMAutoApply,
+        autoApplyMinConfidence: household.autoApplyMinConfidence,
       };
       const result = await runPipeline(toClassify, {
         rules: compiled,
@@ -327,7 +332,7 @@ export function TransactionsView() {
     }
   }
 
-  if (!firstHousehold) return <><h2>Transactions</h2><p className="muted">No household yet.</p></>;
+  if (!household) return <><h2>Transactions</h2><p className="muted">No household yet.</p></>;
 
   return (
     <>
@@ -416,19 +421,26 @@ export function TransactionsView() {
           <span className="muted">Select all visible ({filtered.length})</span>
         </div>
       )}
-      {filtered.slice(0, 200).map(({ tx, account }) => (
-        <Row
-          key={tx.id}
-          tx={tx}
-          accountName={account.name}
-          categories={categories}
-          effectiveId={effectiveCategoryId(tx)}
-          household={firstHousehold}
-          tagChoices={(firstHousehold.tags ?? []).filter((t) => t && !t.archived).map((t) => ({ id: t!.id, name: t!.name, color: t!.color }))}
-          selected={visibleSelected.has(tx.id)}
-          onToggleSelected={(on) => toggleRow(tx.id, on)}
-        />
-      ))}
+      {filtered.slice(0, 200).map(({ tx, account }) => {
+        const tagChoiceList: { id: string; name: string; color: string }[] = [];
+        for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
+          if (!t || t.archived) continue;
+          tagChoiceList.push({ id: t.$jazz.id, name: t.name, color: t.color });
+        }
+        return (
+          <Row
+            key={tx.$jazz.id}
+            tx={tx}
+            accountName={account.name}
+            categories={categories}
+            effectiveId={effectiveCategoryId(tx)}
+            household={household}
+            tagChoices={tagChoiceList}
+            selected={visibleSelected.has(tx.$jazz.id)}
+            onToggleSelected={(on) => toggleRow(tx.$jazz.id, on)}
+          />
+        );
+      })}
       {filtered.length > 200 && (
         <p className="muted">Showing first 200 of {filtered.length}. Narrow the filters to see the rest.</p>
       )}
@@ -440,21 +452,21 @@ export function TransactionsView() {
 function Row({
   tx, accountName, categories, effectiveId, household, tagChoices, selected, onToggleSelected,
 }: {
-  tx: Transaction;
+  tx: LoadedTransaction;
   accountName: string;
   categories: { id: string; name: string }[];
   effectiveId?: string;
-  household: import("@resonable/schema").Household;
+  household: LoadedHousehold;
   tagChoices: { id: string; name: string; color: string }[];
   selected: boolean;
   onToggleSelected: (on: boolean) => void;
 }) {
-  const { me } = useAccount();
+  const me = useCurrentAccount();
   const [expanded, setExpanded] = useState(false);
   const [addingTag, setAddingTag] = useState(false);
 
-  const pending: AISuggestion[] = [];
-  for (const s of tx.suggestions ?? []) {
+  const pending: LoadedAISuggestion[] = [];
+  for (const s of tx.suggestions as unknown as ReadonlyArray<LoadedAISuggestion>) {
     if (s && s.accepted === undefined) pending.push(s);
   }
 
@@ -463,31 +475,38 @@ function Row({
   const availableTags = tagChoices.filter((t) => !activeTagIds.has(t.id));
 
   function setCategory(categoryId: string) {
-    if (!me) return;
-    const group = household._owner.castAs(Group);
+    if (!me.$isLoaded) return;
+    const group = household.$jazz.owner;
     bulkApplyCategory(
-      { household, meAccountId: me.id, group },
-      [tx.id],
+      { household, meAccountId: me.$jazz.id, group },
+      [tx.$jazz.id],
       categoryId,
       "user",
     );
   }
 
+  function findTag(tagId: string): LoadedTag | undefined {
+    for (const t of household.tags as unknown as ReadonlyArray<LoadedTag>) {
+      if (t?.$jazz.id === tagId) return t;
+    }
+    return undefined;
+  }
+
   function addTagById(tagId: string) {
-    if (!me) return;
-    const tag = (household.tags ?? []).find((t) => t?.id === tagId);
+    if (!me.$isLoaded) return;
+    const tag = findTag(tagId);
     if (!tag) return;
-    const group = household._owner.castAs(Group);
-    addTagToTransaction({ household, meAccountId: me.id, group }, tx, tag);
+    const group = household.$jazz.owner;
+    addTagToTransaction({ household, meAccountId: me.$jazz.id, group }, tx, tag);
     setAddingTag(false);
   }
 
   function removeTagById(tagId: string) {
-    if (!me) return;
-    const tag = (household.tags ?? []).find((t) => t?.id === tagId);
+    if (!me.$isLoaded) return;
+    const tag = findTag(tagId);
     if (!tag) return;
-    const group = household._owner.castAs(Group);
-    removeTagFromTransaction({ household, meAccountId: me.id, group }, tx, tag);
+    const group = household.$jazz.owner;
+    removeTagFromTransaction({ household, meAccountId: me.$jazz.id, group }, tx, tag);
   }
 
   return (
@@ -552,7 +571,7 @@ function Row({
           ) : null}
         </div>
         {expanded && pending.map((s, i) => (
-          <SuggestionCard key={i} tx={tx} suggestion={s} meAccountId={me?.id ?? ""} />
+          <SuggestionCard key={i} tx={tx} suggestion={s} household={household} meAccountId={me.$isLoaded ? me.$jazz.id : ""} />
         ))}
       </div>
       <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
@@ -573,16 +592,21 @@ function Row({
 }
 
 function SuggestionCard({
-  tx, suggestion, meAccountId,
-}: { tx: Transaction; suggestion: AISuggestion; meAccountId: string }) {
-  const group = tx._owner.castAs(Group);
-  const household = group as unknown; // we don't have a direct link here; accept/reject only need the tx + suggestion
-  void household;
+  tx, suggestion, household, meAccountId,
+}: {
+  tx: LoadedTransaction;
+  suggestion: LoadedAISuggestion;
+  household: LoadedHousehold;
+  meAccountId: string;
+}) {
+  const group = household.$jazz.owner;
+  const suggestedCat = suggestion.suggestedCategoryRef;
+  const suggestedName = suggestedCat && suggestedCat.$isLoaded ? suggestedCat.name : "\u2014";
 
   return (
     <div className="card" style={{ marginTop: 6 }}>
       <div className="muted" style={{ fontSize: 12 }}>
-        suggested: {suggestion.suggestedCategoryRef?.name ?? "\u2014"}
+        suggested: {suggestedName}
         {" \u2022 "}
         confidence {(suggestion.confidence * 100).toFixed(0)}%
         {" \u2022 "}
@@ -594,7 +618,7 @@ function SuggestionCard({
           className="primary"
           onClick={() =>
             acceptSuggestion(
-              { household: tx._owner as never, meAccountId, group },
+              { household, meAccountId, group },
               tx,
               suggestion,
             )

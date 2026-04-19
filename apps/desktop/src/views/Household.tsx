@@ -5,11 +5,14 @@ import {
   Category,
   CategoryList,
   Household,
+  HouseholdRef,
+  ResonableAccount,
   Rule,
   RuleList,
   Tag,
   TagList,
 } from "@resonable/schema";
+import type { Household as HouseholdT } from "@resonable/schema";
 import { encodeInvite, INVITE_TTL_MS, decodeInvite } from "@resonable/core";
 import { useAccount } from "../jazz";
 
@@ -43,19 +46,21 @@ const STARTER_CATEGORIES: Array<{ name: string; color: string; icon?: string }> 
 ];
 
 export function HouseholdView() {
-  const { me } = useAccount();
-  const households = me?.profile?.households;
+  const me = useAccount(ResonableAccount, {
+    resolve: { profile: { households: { $each: { household: true } } } },
+  });
+  const households = me.$isLoaded ? me.profile.households : undefined;
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState("");
 
   function create(name: string) {
-    if (!me) return;
+    if (!me || !me.$isLoaded) return;
     const group = Group.create({ owner: me });
     group.addMember("everyone", "reader");
     const accounts = AccountList.create([], { owner: group });
     const categories = CategoryList.create([], { owner: group });
     for (const c of STARTER_CATEGORIES) {
-      categories.push(
+      categories.$jazz.push(
         Category.create(
           { name: c.name, color: c.color, icon: c.icon, archived: false },
           { owner: group },
@@ -64,7 +69,7 @@ export function HouseholdView() {
     }
     const tags = TagList.create([], { owner: group });
     for (const t of STARTER_TAGS) {
-      tags.push(Tag.create({ name: t.name, color: t.color, archived: false }, { owner: group }));
+      tags.$jazz.push(Tag.create({ name: t.name, color: t.color, archived: false }, { owner: group }));
     }
     const categoryByName = new Map<string, Category>();
     for (const c of categories) if (c) categoryByName.set(c.name, c);
@@ -79,9 +84,9 @@ export function HouseholdView() {
       }));
       const spec = {
         match: { any: conditions },
-        action: { setCategoryId: cat.id },
+        action: { setCategoryId: cat.$jazz.id },
       };
-      rules.push(
+      rules.$jazz.push(
         Rule.create(
           {
             name: r.name,
@@ -90,7 +95,7 @@ export function HouseholdView() {
             enabled: true,
             source: "derived",
             confidence: 0.95,
-            createdByAccountId: me.id,
+            createdByAccountId: me.$jazz.id,
             createdAt: new Date().toISOString(),
             hitCount: 0,
             provenance: "Seeded on household creation.",
@@ -103,7 +108,7 @@ export function HouseholdView() {
       {
         name,
         createdAt: new Date().toISOString(),
-        createdByAccountId: me.id,
+        createdByAccountId: me.$jazz.id,
         accounts,
         categories,
         tags,
@@ -115,17 +120,19 @@ export function HouseholdView() {
       },
       { owner: group },
     );
-    me.profile?.households?.push(
-      // @ts-expect-error \u2014 HouseholdRef created inline
+    const ref = HouseholdRef.create(
       { household, joinedAt: new Date().toISOString() },
+      { owner: me.profile.households.$jazz.owner },
     );
+    me.profile.households.$jazz.push(ref);
     setCreating(false);
   }
 
   async function accept(token: string) {
+    if (!me.$isLoaded) return;
     try {
       const payload = decodeInvite(token.trim());
-      await me?.acceptInvite(payload.householdId as never, payload.secret as never, Household);
+      await me.acceptInvite(payload.householdId as never, payload.secret as never, Household);
       setJoining("");
     } catch (err) {
       alert((err as Error).message);
@@ -139,8 +146,8 @@ export function HouseholdView() {
         A household is a Jazz Group. Members see shared accounts and transactions;
         permissions (reader / writer / admin) control who can label and add rules.
       </p>
-      {households?.map((ref, i) => ref?.household ? (
-        <HouseholdCard key={i} household={ref.household} />
+      {(households as unknown as ReadonlyArray<HouseholdRef> | undefined)?.map((ref, i) => ref?.$isLoaded && ref.household?.$isLoaded ? (
+        <HouseholdCard key={i} household={ref.household as HouseholdT} />
       ) : null)}
       <div className="card">
         {creating ? (
@@ -169,16 +176,16 @@ export function HouseholdView() {
 }
 
 function HouseholdCard({ household }: { household: Household }) {
-  const group = useMemo(() => household._owner.castAs(Group), [household]);
+  const group = useMemo(() => household.$jazz.owner, [household]);
   const [roleForInvite, setRoleForInvite] = useState<"reader" | "writer">("writer");
   const [lastInvite, setLastInvite] = useState<string | null>(null);
 
   function makeInvite() {
-    const secret = group._raw.createInvite(roleForInvite);
+    const secret = group.$jazz.createInvite(roleForInvite);
     setLastInvite(
       encodeInvite({
         version: 1,
-        householdId: household.id,
+        householdId: household.$jazz.id,
         role: roleForInvite,
         secret,
         expiresAt: Date.now() + INVITE_TTL_MS,
@@ -192,7 +199,7 @@ function HouseholdCard({ household }: { household: Household }) {
         <div>
           <strong>{household.name}</strong>
           <span className="pill">{group.myRole() ?? "member"}</span>
-          <div className="muted">id: {household.id}</div>
+          <div className="muted">id: {household.$jazz.id}</div>
         </div>
       </div>
       <label>Invite a housemate</label>

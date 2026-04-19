@@ -1,17 +1,19 @@
-import { CoMap, CoList, co } from "jazz-tools";
+import { co, z } from "jazz-tools";
 import { Connection } from "./connection";
 import { TransactionList } from "./transaction";
 
-export class Account extends CoMap {
-  name = co.string;
-  iban = co.optional.string;
-  currency = co.string;
-  institutionName = co.string;
-  externalId = co.string;
-  connection = co.ref(Connection);
-  transactions = co.ref(TransactionList);
-  archived = co.boolean;
-  createdAt = co.string;
-}
+export const Account = co.map({
+  name: z.string(),
+  iban: z.optional(z.string()),
+  currency: z.string(),
+  institutionName: z.string(),
+  externalId: z.string(),
+  connection: Connection,
+  transactions: TransactionList,
+  archived: z.boolean(),
+  createdAt: z.string(),
+});
+export type Account = co.loaded<typeof Account>;
 
-export class AccountList extends CoList.Of(co.ref(Account)) {}
+export const AccountList = co.list(Account);
+export type AccountList = co.loaded<typeof AccountList>;

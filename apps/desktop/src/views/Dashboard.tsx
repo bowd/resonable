@@ -6,33 +6,33 @@ import {
   type Summary,
   type SummaryInput,
 } from "@resonable/core";
-import { useAccount } from "../jazz";
+import type { LoadedTag } from "@resonable/schema";
+import { useFirstHousehold } from "../jazz";
 import { effectiveCategoryId, effectiveTagIds, readAllTransactions, readCategories } from "../data/bindings";
 
 export function DashboardView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const { household } = useFirstHousehold();
   const [range, setRange] = useState<DateRange>(() => defaultRange());
 
   const categories = useMemo(
-    () => (firstHousehold ? readCategories(firstHousehold) : []),
-    [firstHousehold, firstHousehold?.categories?.length],
+    () => (household ? readCategories(household) : []),
+    [household],
   );
 
   const tags = useMemo<{ id: string; name: string; color: string }[]>(() => {
-    if (!firstHousehold) return [];
+    if (!household) return [];
     const out: { id: string; name: string; color: string }[] = [];
-    for (const tg of firstHousehold.tags ?? []) {
+    for (const tg of household.tags as unknown as ReadonlyArray<LoadedTag>) {
       if (!tg || tg.archived) continue;
-      out.push({ id: tg.id, name: tg.name, color: tg.color });
+      out.push({ id: tg.$jazz.id, name: tg.name, color: tg.color });
     }
     return out;
-  }, [firstHousehold, firstHousehold?.tags?.length]);
+  }, [household]);
 
   const inputs: SummaryInput[] = useMemo(() => {
-    if (!firstHousehold) return [];
-    return readAllTransactions(firstHousehold).map(({ tx, pipelineInput }) => ({
-      id: tx.id,
+    if (!household) return [];
+    return readAllTransactions(household).map(({ tx, pipelineInput }) => ({
+      id: tx.$jazz.id,
       bookedAt: pipelineInput.bookedAt,
       amountMinor: pipelineInput.amountMinor,
       currency: pipelineInput.currency,
@@ -41,10 +41,7 @@ export function DashboardView() {
       categoryId: effectiveCategoryId(tx),
       tagIds: [...effectiveTagIds(tx)],
     }));
-  }, [
-    firstHousehold,
-    firstHousehold?.accounts?.flatMap((a) => (a?.transactions ?? []).map((t) => t?.labels?.length ?? 0).join(".")).join(","),
-  ]);
+  }, [household]);
 
   const summary = useMemo(() => summarize(inputs, range), [inputs, range]);
   const categoryName = (id: string | null) =>
@@ -55,7 +52,7 @@ export function DashboardView() {
     return { name: `(deleted: ${id.slice(0, 6)})`, color: null };
   };
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Dashboard</h2>

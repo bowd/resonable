@@ -1,13 +1,12 @@
 import { useMemo, useState } from "react";
-import { Group } from "jazz-tools";
 import {
   clusterByMerchant,
   labelCluster,
   type Cluster,
   type ClusterItem,
 } from "@resonable/core";
-import { Household } from "@resonable/schema";
-import { useAccount } from "../jazz";
+import type { LoadedHousehold } from "@resonable/schema";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import { platform } from "../platform";
 import {
   bulkApplyCategory,
@@ -17,21 +16,21 @@ import {
 } from "../data/bindings";
 
 export function ClustersView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const me = useCurrentAccount();
+  const { household } = useFirstHousehold();
 
   const categories = useMemo(
-    () => (firstHousehold ? readCategories(firstHousehold) : []),
-    [firstHousehold, firstHousehold?.categories?.length],
+    () => (household ? readCategories(household) : []),
+    [household],
   );
 
   const clusters = useMemo<Cluster[]>(() => {
-    if (!firstHousehold) return [];
+    if (!household) return [];
     const unlabeled: ClusterItem[] = [];
-    for (const { tx, pipelineInput } of readAllTransactions(firstHousehold)) {
+    for (const { tx, pipelineInput } of readAllTransactions(household)) {
       if (effectiveCategoryId(tx)) continue;
       unlabeled.push({
-        id: tx.id,
+        id: tx.$jazz.id,
         counterparty: pipelineInput.counterparty,
         description: pipelineInput.description,
         amountMinor: pipelineInput.amountMinor,
@@ -41,15 +40,9 @@ export function ClustersView() {
       });
     }
     return clusterByMerchant(unlabeled);
-  }, [
-    firstHousehold,
-    firstHousehold?.accounts?.flatMap((a) => a?.transactions?.length ?? 0).join(","),
-    firstHousehold?.accounts?.flatMap((a) =>
-      (a?.transactions ?? []).map((t) => t?.labels?.length ?? 0).join("."),
-    ).join(","),
-  ]);
+  }, [household]);
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Clusters</h2>
@@ -70,9 +63,9 @@ export function ClustersView() {
         <ClusterCard
           key={c.key}
           cluster={c}
-          household={firstHousehold}
+          household={household}
           categories={categories}
-          meAccountId={me?.id ?? ""}
+          meAccountId={me.$isLoaded ? me.$jazz.id : ""}
         />
       ))}
     </>
@@ -83,7 +76,7 @@ function ClusterCard({
   cluster, household, categories, meAccountId,
 }: {
   cluster: Cluster;
-  household: Household;
+  household: LoadedHousehold;
   categories: { id: string; name: string }[];
   meAccountId: string;
 }) {
@@ -106,7 +99,7 @@ function ClusterCard({
 
   function apply() {
     if (!categoryId) return;
-    const group = household._owner.castAs(Group);
+    const group = household.$jazz.owner;
     const n = bulkApplyCategory(
       { household, meAccountId, group },
       cluster.members.map((m) => m.id),

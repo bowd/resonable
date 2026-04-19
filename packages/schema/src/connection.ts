@@ -1,23 +1,24 @@
-import { CoMap, co } from "jazz-tools";
+import { co, z } from "jazz-tools";
 
 /**
  * A GoCardless requisition representing a bank-link session.
- * Credentials (secret_id/key) never live here \u2014 they stay in the
+ * Credentials (secret_id/key) never live here — they stay in the
  * connection owner's OS keychain. Only the short-lived access token
  * and refresh metadata are encrypted and shared via the household Group.
  */
-export class Connection extends CoMap {
-  provider = co.string;
-  institutionId = co.string;
-  institutionName = co.string;
-  requisitionId = co.string;
-  ownerAccountId = co.string;
-  status = co.string;
-  linkedAt = co.string;
-  lastSyncAt = co.optional.string;
-  lastError = co.optional.string;
-  /** Access tokens rotate \u2014 cached encrypted under the household Group so read-only members can sync reads. */
-  accessTokenEncrypted = co.optional.string;
-  accessTokenExpiresAt = co.optional.string;
-  refreshTokenExpiresAt = co.optional.string;
-}
+export const Connection = co.map({
+  provider: z.string(),
+  institutionId: z.string(),
+  institutionName: z.string(),
+  requisitionId: z.string(),
+  ownerAccountId: z.string(),
+  status: z.string(),
+  linkedAt: z.string(),
+  lastSyncAt: z.optional(z.string()),
+  lastError: z.optional(z.string()),
+  /** Access tokens rotate — cached encrypted under the household Group so read-only members can sync reads. */
+  accessTokenEncrypted: z.optional(z.string()),
+  accessTokenExpiresAt: z.optional(z.string()),
+  refreshTokenExpiresAt: z.optional(z.string()),
+});
+export type Connection = co.loaded<typeof Connection>;

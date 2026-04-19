@@ -1,4 +1,4 @@
-import { CoMap, CoList, co } from "jazz-tools";
+import { co, z } from "jazz-tools";
 
 export const RuleSource = ["user", "llm", "derived"] as const;
 export type RuleSourceT = (typeof RuleSource)[number];
@@ -7,22 +7,24 @@ export type RuleSourceT = (typeof RuleSource)[number];
  * Matcher/action spec is stored as a JSON string to keep the Jazz schema flat.
  * The shape is defined by @resonable/core's RuleSpec type and enforced there.
  */
-export class Rule extends CoMap {
-  name = co.string;
-  specJson = co.string;
-  priority = co.number;
-  enabled = co.boolean;
-  source = co.string;
-  confidence = co.number;
-  createdByAccountId = co.string;
-  createdAt = co.string;
-  hitCount = co.number;
-  lastHitAt = co.optional.string;
-  disabledByAccountId = co.optional.string;
-  disabledAt = co.optional.string;
-  provenance = co.optional.string;
-  lastEditedByAccountId = co.optional.string;
-  lastEditedAt = co.optional.string;
-}
+export const Rule = co.map({
+  name: z.string(),
+  specJson: z.string(),
+  priority: z.number(),
+  enabled: z.boolean(),
+  source: z.string(),
+  confidence: z.number(),
+  createdByAccountId: z.string(),
+  createdAt: z.string(),
+  hitCount: z.number(),
+  lastHitAt: z.optional(z.string()),
+  disabledByAccountId: z.optional(z.string()),
+  disabledAt: z.optional(z.string()),
+  provenance: z.optional(z.string()),
+  lastEditedByAccountId: z.optional(z.string()),
+  lastEditedAt: z.optional(z.string()),
+});
+export type Rule = co.loaded<typeof Rule>;
 
-export class RuleList extends CoList.Of(co.ref(Rule)) {}
+export const RuleList = co.list(Rule);
+export type RuleList = co.loaded<typeof RuleList>;

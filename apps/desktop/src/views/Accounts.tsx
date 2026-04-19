@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Group } from "jazz-tools";
-import { Account, Household } from "@resonable/schema";
-import { useAccount } from "../jazz";
+import type { LoadedAccount, LoadedHousehold } from "@resonable/schema";
+import { useCurrentAccount, useFirstHousehold } from "../jazz";
 import { fixtureBank, platform } from "../platform";
 import { importAccountForConnection, syncAccount } from "../data/import";
 
@@ -50,10 +49,9 @@ function savePending(list: PendingRequisition[]) {
 }
 
 export function AccountsView() {
-  const { me } = useAccount();
-  const firstHousehold = me?.profile?.households?.[0]?.household;
+  const { household } = useFirstHousehold();
 
-  if (!firstHousehold) {
+  if (!household) {
     return (
       <>
         <h2>Accounts</h2>
@@ -62,33 +60,35 @@ export function AccountsView() {
     );
   }
 
+  const accounts = household.accounts as unknown as ReadonlyArray<LoadedAccount>;
+
   return (
     <>
-      <h2>Accounts in {firstHousehold.name}</h2>
+      <h2>Accounts in {household.name}</h2>
       <p className="muted">
         Each linked bank connection is owned by the member who provides the
         GoCardless credentials. Transactions replicate to every household
         member via the shared Group.
       </p>
-      {firstHousehold.accounts?.map((acc, i) => acc ? (
-        <AccountCard key={i} account={acc} household={firstHousehold} />
+      {accounts.map((acc, i) => acc ? (
+        <AccountCard key={i} account={acc} household={household} />
       ) : null)}
-      <LinkBankForm household={firstHousehold} />
+      <LinkBankForm household={household} />
     </>
   );
 }
 
-function AccountCard({ account, household }: { account: Account; household: Household }) {
-  const { me } = useAccount();
+function AccountCard({ account, household }: { account: LoadedAccount; household: LoadedHousehold }) {
+  const me = useCurrentAccount();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   async function resync() {
-    if (!me) return;
+    if (!me.$isLoaded) return;
     setBusy(true); setMsg(null);
     try {
-      const group = household._owner.castAs(Group);
-      const connectionId = `${household.id}:${me.id}`;
+      const group = household.$jazz.owner;
+      const connectionId = `${household.$jazz.id}:${me.$jazz.id}`;
       const res = await syncAccount({
         bank: platform.bankData,
         connectionId,
@@ -112,7 +112,7 @@ function AccountCard({ account, household }: { account: Account; household: Hous
           <div className="muted">{account.institutionName} \u2022 {account.iban ?? "\u2014"}</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div className="muted">{account.transactions?.length ?? 0} tx</div>
+          <div className="muted">{account.transactions.length} tx</div>
           <button onClick={resync} disabled={busy} className="primary" style={{ marginTop: 4, fontSize: 12 }}>
             {busy ? "syncing\u2026" : "Sync"}
           </button>
@@ -123,8 +123,8 @@ function AccountCard({ account, household }: { account: Account; household: Hous
   );
 }
 
-function LinkBankForm({ household }: { household: Household }) {
-  const { me } = useAccount();
+function LinkBankForm({ household }: { household: LoadedHousehold }) {
+  const me = useCurrentAccount();
   const [country, setCountry] = useState("AT");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -147,7 +147,7 @@ function LinkBankForm({ household }: { household: Household }) {
 
   // 5s poll loop for pending requisitions.
   useEffect(() => {
-    if (!me) return;
+    if (!me.$isLoaded) return;
     const tick = async () => {
       const list = pendingRef.current;
       if (list.length === 0) return;
@@ -160,7 +160,7 @@ function LinkBankForm({ household }: { household: Household }) {
     const id = setInterval(() => { void tick(); }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.id]);
+  }, [me.$isLoaded ? me.$jazz.id : null]);
 
   function updatePending(requisitionId: string, patch: Partial<PendingRequisition>) {
     setPending((prev) => prev.map((p) => p.requisitionId === requisitionId ? { ...p, ...patch } : p));
@@ -171,18 +171,18 @@ function LinkBankForm({ household }: { household: Household }) {
   }
 
   async function checkRequisition(entry: PendingRequisition, _manual: boolean) {
-    if (!me) return;
+    if (!me.$isLoaded) return;
     try {
       const res = await platform.bankData.getRequisition(entry.connectionId, entry.requisitionId);
       if (res.status === "LN") {
-        const group = household._owner.castAs(Group);
+        const group = household.$jazz.owner;
         const accounts = await importAccountForConnection({
           bank: platform.bankData,
           connectionId: entry.connectionId,
           requisitionId: entry.requisitionId,
           household,
           group,
-          meAccountId: me.id,
+          meAccountId: me.$jazz.id,
           institutionName: entry.institutionName,
         });
         removePending(entry.requisitionId);
@@ -196,11 +196,11 @@ function LinkBankForm({ household }: { household: Household }) {
   }
 
   async function linkBank(which: "REVOLUT_REVOLT21" | "N26_NTSBDEB1") {
-    if (!me) return;
+    if (!me.$isLoaded) return;
     setBusy(true); setStatus(null);
     try {
-      const group = household._owner.castAs(Group);
-      const connectionId = `${household.id}:${me.id}`;
+      const group = household.$jazz.owner;
+      const connectionId = `${household.$jazz.id}:${me.$jazz.id}`;
       const req = await platform.bankData.createRequisition(connectionId, {
         institutionId: which,
         redirectUrl: "resonable://oauth/callback",
@@ -230,7 +230,7 @@ function LinkBankForm({ household }: { household: Household }) {
         requisitionId: req.id,
         household,
         group,
-        meAccountId: me.id,
+        meAccountId: me.$jazz.id,
         institutionName,
         accountMeta: (id) => demo.accountMeta(id),
       });

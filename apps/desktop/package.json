@@ -14,8 +14,7 @@
     "@resonable/core": "workspace:*",
     "@resonable/schema": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
-    "jazz-react": "^0.8.50",
-    "jazz-tools": "^0.8.50",
+    "jazz-tools": "^0.20.17",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
