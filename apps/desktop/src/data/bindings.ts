@@ -258,6 +258,30 @@ function ensureSuggestions(tx: Transaction, group: Group): AISuggestionList {
   return list;
 }
 
+export function createCategory(
+  ctx: ApplyContext,
+  params: { name: string; color: string; icon?: string },
+): Category {
+  const category = Category.create(
+    { name: params.name, color: params.color, icon: params.icon, archived: false },
+    { owner: ctx.group },
+  );
+  ctx.household.categories?.push(category);
+  return category;
+}
+
+export function renameCategory(category: Category, name: string): void {
+  category.name = name;
+}
+
+export function recolorCategory(category: Category, color: string): void {
+  category.color = color;
+}
+
+export function archiveCategory(category: Category, archived: boolean): void {
+  category.archived = archived;
+}
+
 export type LabelRow = {
   transaction: Transaction;
   account: Account;

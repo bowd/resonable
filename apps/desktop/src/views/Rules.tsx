@@ -3,12 +3,15 @@ import { Group } from "jazz-tools";
 import {
   parseRuleSpec,
   suggestRules,
+  validateRuleSpec,
   type RuleProposal,
+  type RuleSpec,
 } from "@resonable/core";
 import { Household } from "@resonable/schema";
 import { useAccount } from "../jazz";
 import { platform } from "../platform";
 import { createRule, readLabeledTransactions } from "../data/bindings";
+import { RuleBuilder } from "./RuleBuilder";
 
 export function RulesView() {
   const { me } = useAccount();
@@ -134,14 +137,18 @@ function SuggestPanel({ household }: { household: Household }) {
 function AddRuleForm({ household, onDone }: { household: Household; onDone: () => void }) {
   const { me } = useAccount();
   const [name, setName] = useState("");
-  const [spec, setSpec] = useState("");
+  const [spec, setSpec] = useState<RuleSpec | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  const categories = (household.categories ?? [])
+    .filter((c) => Boolean(c) && !c!.archived)
+    .map((c) => ({ id: c!.id, name: c!.name }));
+
   function save() {
-    if (!me) return;
+    if (!me || !spec) return;
     setErr(null);
     try {
-      parseRuleSpec(spec);
+      validateRuleSpec(spec);
     } catch (e) {
       setErr((e as Error).message);
       return;
@@ -149,7 +156,7 @@ function AddRuleForm({ household, onDone }: { household: Household; onDone: () =
     const group = household._owner.castAs(Group);
     createRule(
       { household, meAccountId: me.id, group },
-      { name: name || "Untitled", specJson: spec, source: "user" },
+      { name: name || "Untitled", specJson: JSON.stringify(spec), source: "user" },
     );
     onDone();
   }
@@ -158,16 +165,10 @@ function AddRuleForm({ household, onDone }: { household: Household; onDone: () =
     <>
       <label>Name</label>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Groceries (SPAR)" />
-      <label>Spec (JSON)</label>
-      <textarea
-        rows={8}
-        value={spec}
-        onChange={(e) => setSpec(e.target.value)}
-        placeholder={'{\n  "match": { "all": [{ "kind": "counterpartyContains", "value": "SPAR", "caseInsensitive": true }] },\n  "action": { "setCategoryId": "<category-id>" }\n}'}
-      />
-      {err && <div className="muted">{err}</div>}
-      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-        <button className="primary" onClick={save}>Save</button>
+      <RuleBuilder value={spec} onChange={setSpec} categories={categories} />
+      {err && <div className="muted" style={{ marginTop: 8 }}>{err}</div>}
+      <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+        <button className="primary" onClick={save} disabled={!spec}>Save</button>
         <button onClick={onDone}>Cancel</button>
       </div>
     </>

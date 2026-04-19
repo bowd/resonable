@@ -12,6 +12,7 @@ import {
   acceptSuggestion,
   applyLabelPlan,
   applySuggestionPlan,
+  bulkApplyCategory,
   effectiveCategoryId,
   readAllTransactions,
   readCategories,
@@ -100,20 +101,25 @@ export function TransactionsView() {
           key={tx.id}
           tx={tx}
           accountName={account.name}
-          categoryName={categoryNameFor(tx)}
+          categories={categories}
+          effectiveId={effectiveCategoryId(tx)}
+          household={firstHousehold}
         />
       ))}
     </>
   );
 
-  function categoryNameFor(tx: Transaction): string | undefined {
-    const id = effectiveCategoryId(tx);
-    if (!id) return undefined;
-    return categories.find((c) => c.id === id)?.name;
-  }
 }
 
-function Row({ tx, accountName, categoryName }: { tx: Transaction; accountName: string; categoryName?: string }) {
+function Row({
+  tx, accountName, categories, effectiveId, household,
+}: {
+  tx: Transaction;
+  accountName: string;
+  categories: { id: string; name: string }[];
+  effectiveId?: string;
+  household: import("@resonable/schema").Household;
+}) {
   const { me } = useAccount();
   const [expanded, setExpanded] = useState(false);
 
@@ -122,13 +128,23 @@ function Row({ tx, accountName, categoryName }: { tx: Transaction; accountName: 
     if (s && s.accepted === undefined) pending.push(s);
   }
 
+  function setCategory(categoryId: string) {
+    if (!me) return;
+    const group = household._owner.castAs(Group);
+    bulkApplyCategory(
+      { household, meAccountId: me.id, group },
+      [tx.id],
+      categoryId,
+      "user",
+    );
+  }
+
   return (
     <div className="row">
       <div style={{ flex: 1 }}>
         <div>
           <strong>{tx.counterparty ?? "\u2014"}</strong>
           <span className="muted" style={{ marginLeft: 8 }}>{tx.description.slice(0, 80)}</span>
-          {categoryName && <span className="pill">{categoryName}</span>}
           {pending.length > 0 && (
             <span className="pill" onClick={() => setExpanded((x) => !x)} style={{ cursor: "pointer" }}>
               {pending.length} suggestion{pending.length > 1 ? "s" : ""}
@@ -142,8 +158,18 @@ function Row({ tx, accountName, categoryName }: { tx: Transaction; accountName: 
           <SuggestionCard key={i} tx={tx} suggestion={s} meAccountId={me?.id ?? ""} />
         ))}
       </div>
-      <div style={{ textAlign: "right" }}>
+      <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
         <div>{(tx.amountMinor / 100).toFixed(2)} {tx.currency}</div>
+        <select
+          value={effectiveId ?? ""}
+          onChange={(e) => e.target.value && setCategory(e.target.value)}
+          style={{ width: 160, fontSize: 12 }}
+        >
+          <option value="">(uncategorized)</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
       </div>
     </div>
   );
