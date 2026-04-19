@@ -109,6 +109,32 @@ export async function syncAccount(params: {
   return { added, skipped };
 }
 
+/**
+ * Append CSV-derived transactions to an account, deduping by externalId the
+ * same way `syncAccount` does. No network calls happen here; the caller is
+ * responsible for parsing the CSV and producing `NormalizedTransaction`s.
+ */
+export function importCsvToAccount(
+  account: Account,
+  normalized: NormalizedTransaction[],
+  group: Group,
+): { added: Transaction[]; skipped: number } {
+  const existingIds = new Set<string>();
+  for (const t of account.transactions ?? []) {
+    if (t) existingIds.add(t.externalId);
+  }
+  const added: Transaction[] = [];
+  let skipped = 0;
+  for (const n of normalized) {
+    if (existingIds.has(n.externalId)) { skipped++; continue; }
+    const tx = createTxCoValue(n, account.id, group);
+    account.transactions?.push(tx);
+    added.push(tx);
+    existingIds.add(n.externalId);
+  }
+  return { added, skipped };
+}
+
 function createTxCoValue(n: NormalizedTransaction, accountId: string, group: Group): Transaction {
   return Transaction.create(
     {
