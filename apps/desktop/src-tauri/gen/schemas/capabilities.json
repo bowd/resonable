@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Capabilities granted to the Resonable main window.","local":true,"windows":["main"],"permissions":["core:default","core:window:default","core:app:default","core:event:default","core:path:default","core:webview:default"]}}
