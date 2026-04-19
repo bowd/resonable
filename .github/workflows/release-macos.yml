@@ -1,0 +1,109 @@
+name: Release (macOS)
+
+# Manual only. Produces unsigned .app + .dmg bundles for both Apple Silicon
+# and Intel, uploads them as workflow artifacts. Code signing / notarization
+# are out of scope here \u2014 adding them later means setting the CSC_LINK,
+# CSC_KEY_PASSWORD, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID secrets and
+# reading them in the "cargo tauri build" step via env.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >
+          Version to stamp into the bundle (overrides tauri.conf.json & Cargo.toml).
+          Leave blank to use whatever is currently committed.
+        required: false
+        type: string
+      bundles:
+        description: Bundle formats to produce
+        required: false
+        default: app,dmg
+        type: string
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest      # Apple Silicon runner
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-13          # Intel runner
+            target: x86_64-apple-darwin
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust (${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          key: macos-${{ matrix.arch }}
+
+      - name: Install Tauri CLI
+        run: |
+          if ! command -v cargo-tauri >/dev/null; then
+            cargo install --locked tauri-cli --version '^2.0.0'
+          fi
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Stamp version (optional input)
+        if: ${{ inputs.version != '' }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const v = process.env.V;
+            const conf = 'apps/desktop/src-tauri/tauri.conf.json';
+            const j = JSON.parse(fs.readFileSync(conf, 'utf8'));
+            j.version = v;
+            fs.writeFileSync(conf, JSON.stringify(j, null, 2) + '\n');
+            const cargo = 'apps/desktop/src-tauri/Cargo.toml';
+            const t = fs.readFileSync(cargo, 'utf8').replace(/^version = \".*\"/m, 'version = \"' + v + '\"');
+            fs.writeFileSync(cargo, t);
+          "
+        env:
+          V: ${{ inputs.version }}
+
+      # Tauri's generate_context! validates that ../dist exists at compile
+      # time, so the Vite build has to precede cargo tauri build.
+      - run: pnpm --filter @resonable/desktop build
+
+      - name: cargo tauri build
+        working-directory: apps/desktop/src-tauri
+        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ inputs.bundles }}
+
+      - name: Collect bundles
+        id: collect
+        run: |
+          set -euxo pipefail
+          out="$GITHUB_WORKSPACE/artifacts"
+          mkdir -p "$out"
+          cp -R apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/* "$out/" || true
+          ls -laR "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resonable-macos-${{ matrix.arch }}
+          path: artifacts/**/*
+          if-no-files-found: error
+          compression-level: 0       # .dmg already compressed; save CPU
+          retention-days: 14

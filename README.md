@@ -140,6 +140,16 @@ Stagehand uses `ANTHROPIC_API_KEY` when present for AI-driven actions, falls bac
 
 GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, core tests, desktop build, and `cargo check` on push and PR.
 
+## macOS release builds
+
+Trigger the `Release (macOS)` workflow manually from the Actions tab. It runs on both Apple Silicon (`macos-latest`) and Intel (`macos-13`) runners and produces unsigned `.app` + `.dmg` bundles uploaded as workflow artifacts (`resonable-macos-arm64`, `resonable-macos-x86_64`).
+
+Optional inputs:
+- `version` \u2014 stamped into `tauri.conf.json` and `Cargo.toml` before the build.
+- `bundles` \u2014 comma-separated tauri bundle targets (default `app,dmg`).
+
+Code signing / notarization are deliberately not wired up; add `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` as repo secrets and read them in the cargo tauri build step when you're ready.
+
 ## License
 
 Not yet declared.
