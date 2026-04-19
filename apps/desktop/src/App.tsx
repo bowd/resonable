@@ -3,10 +3,12 @@ import { JazzApp } from "./jazz";
 import { HouseholdView } from "./views/Household";
 import { AccountsView } from "./views/Accounts";
 import { TransactionsView } from "./views/Transactions";
+import { ClustersView } from "./views/Clusters";
 import { RulesView } from "./views/Rules";
+import { ModerationView } from "./views/Moderation";
 import { SettingsView } from "./views/Settings";
 
-type Tab = "household" | "accounts" | "transactions" | "rules" | "settings";
+type Tab = "household" | "accounts" | "transactions" | "clusters" | "rules" | "moderation" | "settings";
 
 export function App() {
   return (
@@ -26,7 +28,9 @@ function Shell() {
           <NavButton current={tab} id="household" onClick={setTab}>Household</NavButton>
           <NavButton current={tab} id="accounts" onClick={setTab}>Accounts</NavButton>
           <NavButton current={tab} id="transactions" onClick={setTab}>Transactions</NavButton>
+          <NavButton current={tab} id="clusters" onClick={setTab}>Clusters</NavButton>
           <NavButton current={tab} id="rules" onClick={setTab}>Rules</NavButton>
+          <NavButton current={tab} id="moderation" onClick={setTab}>Moderation</NavButton>
           <NavButton current={tab} id="settings" onClick={setTab}>Settings</NavButton>
         </nav>
       </aside>
@@ -34,7 +38,9 @@ function Shell() {
         {tab === "household" && <HouseholdView />}
         {tab === "accounts" && <AccountsView />}
         {tab === "transactions" && <TransactionsView />}
+        {tab === "clusters" && <ClustersView />}
         {tab === "rules" && <RulesView />}
+        {tab === "moderation" && <ModerationView />}
         {tab === "settings" && <SettingsView />}
       </main>
     </div>

@@ -258,4 +258,73 @@ function ensureSuggestions(tx: Transaction, group: Group): AISuggestionList {
   return list;
 }
 
+export type LabelRow = {
+  transaction: Transaction;
+  account: Account;
+  label: TransactionLabel;
+  categoryName?: string;
+};
+
+export function readAllLabels(household: Household): LabelRow[] {
+  const categoryName = (id?: string) =>
+    id ? (household.categories ?? []).find((c) => c?.id === id)?.name : undefined;
+  const rows: LabelRow[] = [];
+  for (const a of household.accounts ?? []) {
+    if (!a) continue;
+    for (const t of a.transactions ?? []) {
+      if (!t) continue;
+      for (const l of t.labels ?? []) {
+        if (!l) continue;
+        rows.push({
+          transaction: t,
+          account: a,
+          label: l,
+          categoryName: categoryName(l.categoryRef?.id),
+        });
+      }
+    }
+  }
+  rows.sort((a, b) => (a.label.at < b.label.at ? 1 : -1));
+  return rows;
+}
+
+export function revokeLabel(label: TransactionLabel): void {
+  label.revoked = true;
+}
+
+/**
+ * Assign the same category to a batch of transactions in a single pass.
+ * Emits one TransactionLabel overlay per transaction with source="user-bulk".
+ */
+export function bulkApplyCategory(
+  ctx: ApplyContext,
+  transactionIds: string[],
+  categoryId: string,
+  source: "user" | "user-bulk" | "llm-accepted" = "user-bulk",
+): number {
+  const category = findCategory(ctx.household, categoryId);
+  if (!category) return 0;
+  let applied = 0;
+  const ids = new Set(transactionIds);
+  for (const a of ctx.household.accounts ?? []) {
+    for (const t of a?.transactions ?? []) {
+      if (!t || !ids.has(t.id)) continue;
+      const label = TransactionLabel.create(
+        {
+          byAccountId: ctx.meAccountId,
+          at: new Date().toISOString(),
+          categoryRef: category,
+          source,
+          confidence: 1,
+          revoked: false,
+        } as never,
+        { owner: ctx.group },
+      );
+      ensureLabels(t, ctx.group).push(label);
+      applied++;
+    }
+  }
+  return applied;
+}
+
 void TransactionList;
