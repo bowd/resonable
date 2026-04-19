@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Group } from "jazz-tools";
 import {
   AccountList,
+  Category,
   CategoryList,
   Household,
   RuleList,
@@ -9,6 +10,17 @@ import {
 } from "@resonable/schema";
 import { encodeInvite, INVITE_TTL_MS, decodeInvite } from "@resonable/core";
 import { useAccount } from "../jazz";
+
+const STARTER_CATEGORIES: Array<{ name: string; color: string; icon?: string }> = [
+  { name: "Groceries",     color: "#16a34a", icon: "\ud83d\uded2" },
+  { name: "Dining out",    color: "#f97316", icon: "\ud83c\udf7d" },
+  { name: "Transport",     color: "#2563eb", icon: "\ud83d\ude8d" },
+  { name: "Subscriptions", color: "#a855f7", icon: "\ud83d\udd01" },
+  { name: "Shopping",      color: "#db2777", icon: "\ud83d\udecd" },
+  { name: "Rent & utils",  color: "#0891b2", icon: "\ud83c\udfe0" },
+  { name: "Income",        color: "#059669", icon: "\ud83d\udcb0" },
+  { name: "Other",         color: "#6b7280" },
+];
 
 export function HouseholdView() {
   const { me } = useAccount();
@@ -22,6 +34,14 @@ export function HouseholdView() {
     group.addMember("everyone", "reader");
     const accounts = AccountList.create([], { owner: group });
     const categories = CategoryList.create([], { owner: group });
+    for (const c of STARTER_CATEGORIES) {
+      categories.push(
+        Category.create(
+          { name: c.name, color: c.color, icon: c.icon, archived: false },
+          { owner: group },
+        ),
+      );
+    }
     const tags = TagList.create([], { owner: group });
     const rules = RuleList.create([], { owner: group });
     const household = Household.create(

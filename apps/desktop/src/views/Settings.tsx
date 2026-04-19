@@ -6,6 +6,7 @@ export function SettingsView() {
   const [model, setModel] = useState(localStorage.getItem("resonable.llm.model") ?? "llama3.2");
   const [syncPeer, setSyncPeer] = useState(localStorage.getItem("resonable.sync.peer") ?? "");
   const [brokerUrl, setBrokerUrl] = useState(localStorage.getItem("resonable.broker.url") ?? "");
+  const [demo, setDemo] = useState(localStorage.getItem("resonable.demo") === "1");
 
   function save() {
     localStorage.setItem("resonable.llm.baseUrl", llmBase);
@@ -14,6 +15,8 @@ export function SettingsView() {
     else localStorage.removeItem("resonable.sync.peer");
     if (brokerUrl) localStorage.setItem("resonable.broker.url", brokerUrl);
     else localStorage.removeItem("resonable.broker.url");
+    if (demo) localStorage.setItem("resonable.demo", "1");
+    else localStorage.removeItem("resonable.demo");
     location.reload();
   }
 
@@ -28,9 +31,16 @@ export function SettingsView() {
         <input value={model} onChange={(e) => setModel(e.target.value)} />
       </div>
       <div className="card">
+        <strong>Demo mode</strong>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+          <input type="checkbox" checked={demo} onChange={(e) => setDemo(e.target.checked)} style={{ width: "auto" }} />
+          <span>Use fixture bank client (Revolut + N26 sample data, no network)</span>
+        </label>
+      </div>
+      <div className="card">
         <strong>Sync</strong>
         <div className="muted">
-          Runtime: {platform.isNative ? "Tauri (native)" : "Web (fallback)"}
+          Runtime: {platform.mode} ({platform.isNative ? "native" : "web"})
         </div>
         <label>Custom sync peer (leave blank for Jazz Mesh)</label>
         <input

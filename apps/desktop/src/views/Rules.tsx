@@ -1,10 +1,20 @@
-import { parseRuleSpec } from "@resonable/core";
+import { useMemo, useState } from "react";
+import { Group } from "jazz-tools";
+import {
+  parseRuleSpec,
+  suggestRules,
+  type RuleProposal,
+} from "@resonable/core";
+import { Household } from "@resonable/schema";
 import { useAccount } from "../jazz";
+import { platform } from "../platform";
+import { createRule, readLabeledTransactions } from "../data/bindings";
 
 export function RulesView() {
   const { me } = useAccount();
   const firstHousehold = me?.profile?.households?.[0]?.household;
   const rules = firstHousehold?.rules ?? [];
+  const [adding, setAdding] = useState(false);
 
   return (
     <>
@@ -13,7 +23,15 @@ export function RulesView() {
         Deterministic rules applied before any LLM call. User-authored rules are
         prioritized over derived ones. Disable a rule to audit its behavior.
       </p>
-      {rules.length === 0 && <p className="muted">No rules yet. Rules can be authored manually or derived from clustered labeled transactions.</p>}
+      {firstHousehold && <SuggestPanel household={firstHousehold} />}
+      <div className="card">
+        {adding && firstHousehold ? (
+          <AddRuleForm household={firstHousehold} onDone={() => setAdding(false)} />
+        ) : (
+          <button className="primary" onClick={() => setAdding(true)}>+ Add rule</button>
+        )}
+      </div>
+      {rules.length === 0 && <p className="muted">No rules yet.</p>}
       {rules.map((r, i) => r ? (
         <div className="card" key={i}>
           <div className="row">
@@ -21,8 +39,14 @@ export function RulesView() {
               <strong>{r.name}</strong>
               <span className="pill">{r.source}</span>
               {!r.enabled && <span className="pill">disabled</span>}
-              <div className="muted">priority {r.priority} \u2022 hit {r.hitCount}\u00d7 \u2022 confidence {(r.confidence * 100).toFixed(0)}%</div>
+              <div className="muted">
+                priority {r.priority} \u2022 hit {r.hitCount}\u00d7
+                \u2022 confidence {(r.confidence * 100).toFixed(0)}%
+              </div>
             </div>
+            <button onClick={() => r.enabled = !r.enabled}>
+              {r.enabled ? "Disable" : "Enable"}
+            </button>
           </div>
           <pre style={{ fontSize: 12, overflow: "auto", margin: 0 }}>
             {safeFormat(r.specJson)}
@@ -32,6 +56,126 @@ export function RulesView() {
       ) : null)}
     </>
   );
+}
+
+function SuggestPanel({ household }: { household: Household }) {
+  const { me } = useAccount();
+  const [busy, setBusy] = useState(false);
+  const [proposals, setProposals] = useState<RuleProposal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true); setError(null);
+    try {
+      const labeled = readLabeledTransactions(household);
+      const result = await suggestRules(labeled, {
+        minSupport: 2,
+        useLLM: true,
+        llm: platform.llm,
+        maxLLMCalls: 3,
+      });
+      setProposals(result);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function accept(p: RuleProposal) {
+    if (!me) return;
+    const group = household._owner.castAs(Group);
+    const category = (household.categories ?? []).find((c) => c?.id === p.categoryId);
+    createRule(
+      { household, meAccountId: me.id, group },
+      {
+        name: `Auto: ${category?.name ?? p.categoryId}`,
+        specJson: JSON.stringify(p.spec),
+        source: p.source === "heuristic" ? "derived" : "llm",
+        confidence: p.source === "llm" ? 0.7 : 0.9,
+        provenance: `Derived from ${p.supportCount} labeled transactions (${p.source}).`,
+      },
+    );
+    setProposals((prev) => prev?.filter((x) => x !== p) ?? null);
+  }
+
+  return (
+    <div className="card">
+      <div className="row">
+        <div>
+          <strong>Suggest rules from labeled transactions</strong>
+          <div className="muted">Heuristic LCS proposer first; LLM fallback for categories it can\u2019t cover.</div>
+        </div>
+        <button className="primary" onClick={run} disabled={busy}>
+          {busy ? "Thinking\u2026" : "Run"}
+        </button>
+      </div>
+      {error && <p className="muted">{error}</p>}
+      {proposals?.length === 0 && <p className="muted">No proposals. Label a few more transactions first.</p>}
+      {proposals?.map((p, i) => (
+        <div className="card" key={i}>
+          <div className="row">
+            <div>
+              <strong>{categoryName(household, p.categoryId)}</strong>
+              <span className="pill">{p.source}</span>
+              <div className="muted">supports {p.supportCount} transactions</div>
+            </div>
+            <button className="primary" onClick={() => accept(p)}>Accept</button>
+          </div>
+          <pre style={{ fontSize: 12, overflow: "auto", margin: 0 }}>
+            {JSON.stringify(p.spec, null, 2)}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AddRuleForm({ household, onDone }: { household: Household; onDone: () => void }) {
+  const { me } = useAccount();
+  const [name, setName] = useState("");
+  const [spec, setSpec] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+
+  function save() {
+    if (!me) return;
+    setErr(null);
+    try {
+      parseRuleSpec(spec);
+    } catch (e) {
+      setErr((e as Error).message);
+      return;
+    }
+    const group = household._owner.castAs(Group);
+    createRule(
+      { household, meAccountId: me.id, group },
+      { name: name || "Untitled", specJson: spec, source: "user" },
+    );
+    onDone();
+  }
+
+  return (
+    <>
+      <label>Name</label>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Groceries (SPAR)" />
+      <label>Spec (JSON)</label>
+      <textarea
+        rows={8}
+        value={spec}
+        onChange={(e) => setSpec(e.target.value)}
+        placeholder={'{\n  "match": { "all": [{ "kind": "counterpartyContains", "value": "SPAR", "caseInsensitive": true }] },\n  "action": { "setCategoryId": "<category-id>" }\n}'}
+      />
+      {err && <div className="muted">{err}</div>}
+      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+        <button className="primary" onClick={save}>Save</button>
+        <button onClick={onDone}>Cancel</button>
+      </div>
+    </>
+  );
+}
+
+function categoryName(household: Household, id: string): string {
+  return (household.categories ?? []).find((c) => c?.id === id)?.name ?? id;
 }
 
 function safeFormat(json: string): string {
