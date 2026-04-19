@@ -43,6 +43,16 @@ jobs:
             libjavascriptcoregtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev
+      # Tauri's generate_context! macro validates that frontendDist (../dist)
+      # physically exists when the crate is compiled, so the Vite build has to
+      # run before cargo check.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @resonable/desktop build
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
