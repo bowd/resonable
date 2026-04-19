@@ -5,11 +5,12 @@ export type RuleBuilderProps = {
   value: RuleSpec | null;
   onChange: (next: RuleSpec) => void;
   categories: { id: string; name: string }[];
+  tags?: { id: string; name: string; color: string }[];
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export function RuleBuilder({ value, onChange, categories }: RuleBuilderProps) {
+export function RuleBuilder({ value, onChange, categories, tags = [] }: RuleBuilderProps) {
   const spec: RuleSpec = value ?? emptySpec();
   const mode: "all" | "any" = "all" in spec.match ? "all" : "any";
   const conditions = ("all" in spec.match ? spec.match.all : spec.match.any) as Condition[];
@@ -61,6 +62,38 @@ export function RuleBuilder({ value, onChange, categories }: RuleBuilderProps) {
           <option value="">(none)</option>
           {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        {tags.length > 0 && (
+          <>
+            <label>Add tags</label>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {tags.map((t) => {
+                const on = (spec.action.addTagIds ?? []).includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      const current = spec.action.addTagIds ?? [];
+                      const next = on ? current.filter((x) => x !== t.id) : [...current, t.id];
+                      setAction({ addTagIds: next.length > 0 ? next : undefined });
+                    }}
+                    style={{
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: on ? t.color : "transparent",
+                      color: on ? "white" : "inherit",
+                      border: `1px solid ${t.color}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {t.name}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
         <label>Note (optional)</label>
         <input
           value={spec.action.note ?? ""}

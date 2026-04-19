@@ -6,6 +6,7 @@ import {
   Category,
   Household,
   Rule,
+  Tag,
   Transaction,
   TransactionLabel,
   TransactionLabelList,
@@ -256,6 +257,75 @@ function ensureSuggestions(tx: Transaction, group: Group): AISuggestionList {
   const list = AISuggestionList.create([], { owner: group });
   tx.suggestions = list;
   return list;
+}
+
+export function createTag(
+  ctx: ApplyContext,
+  params: { name: string; color: string },
+): Tag {
+  const tag = Tag.create(
+    { name: params.name, color: params.color, archived: false },
+    { owner: ctx.group },
+  );
+  ctx.household.tags?.push(tag);
+  return tag;
+}
+
+export function renameTag(tag: Tag, name: string): void {
+  tag.name = name;
+}
+
+export function recolorTag(tag: Tag, color: string): void {
+  tag.color = color;
+}
+
+export function archiveTag(tag: Tag, archived: boolean): void {
+  tag.archived = archived;
+}
+
+export function addTagToTransaction(ctx: ApplyContext, tx: Transaction, tag: Tag): void {
+  const label = TransactionLabel.create(
+    {
+      byAccountId: ctx.meAccountId,
+      at: new Date().toISOString(),
+      addTag: tag,
+      source: "user",
+      confidence: 1,
+      revoked: false,
+    } as never,
+    { owner: ctx.group },
+  );
+  ensureLabels(tx, ctx.group).push(label);
+}
+
+export function removeTagFromTransaction(ctx: ApplyContext, tx: Transaction, tag: Tag): void {
+  const label = TransactionLabel.create(
+    {
+      byAccountId: ctx.meAccountId,
+      at: new Date().toISOString(),
+      removeTag: tag,
+      source: "user",
+      confidence: 1,
+      revoked: false,
+    } as never,
+    { owner: ctx.group },
+  );
+  ensureLabels(tx, ctx.group).push(label);
+}
+
+/**
+ * Resolve a transaction's active tag ids by replaying the label overlay.
+ * addTag adds, removeTag removes, revoked labels are skipped. Insertion
+ * order defines the last-write-wins semantics for the same tag.
+ */
+export function effectiveTagIds(tx: Transaction): Set<string> {
+  const active = new Set<string>();
+  for (const l of tx.labels ?? []) {
+    if (!l || l.revoked) continue;
+    if (l.addTag) active.add(l.addTag.id);
+    if (l.removeTag) active.delete(l.removeTag.id);
+  }
+  return active;
 }
 
 export function createCategory(

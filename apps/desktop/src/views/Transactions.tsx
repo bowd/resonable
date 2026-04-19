@@ -10,14 +10,17 @@ import { useAccount } from "../jazz";
 import { platform } from "../platform";
 import {
   acceptSuggestion,
+  addTagToTransaction,
   applyLabelPlan,
   applySuggestionPlan,
   bulkApplyCategory,
   effectiveCategoryId,
+  effectiveTagIds,
   readAllTransactions,
   readCategories,
   readCompiledRules,
   rejectSuggestion,
+  removeTagFromTransaction,
 } from "../data/bindings";
 
 type Filters = {
@@ -200,6 +203,7 @@ export function TransactionsView() {
           categories={categories}
           effectiveId={effectiveCategoryId(tx)}
           household={firstHousehold}
+          tagChoices={(firstHousehold.tags ?? []).filter((t) => t && !t.archived).map((t) => ({ id: t!.id, name: t!.name, color: t!.color }))}
         />
       ))}
       {filtered.length > 200 && (
@@ -211,21 +215,27 @@ export function TransactionsView() {
 }
 
 function Row({
-  tx, accountName, categories, effectiveId, household,
+  tx, accountName, categories, effectiveId, household, tagChoices,
 }: {
   tx: Transaction;
   accountName: string;
   categories: { id: string; name: string }[];
   effectiveId?: string;
   household: import("@resonable/schema").Household;
+  tagChoices: { id: string; name: string; color: string }[];
 }) {
   const { me } = useAccount();
   const [expanded, setExpanded] = useState(false);
+  const [addingTag, setAddingTag] = useState(false);
 
   const pending: AISuggestion[] = [];
   for (const s of tx.suggestions ?? []) {
     if (s && s.accepted === undefined) pending.push(s);
   }
+
+  const activeTagIds = effectiveTagIds(tx);
+  const activeTags = tagChoices.filter((t) => activeTagIds.has(t.id));
+  const availableTags = tagChoices.filter((t) => !activeTagIds.has(t.id));
 
   function setCategory(categoryId: string) {
     if (!me) return;
@@ -236,6 +246,23 @@ function Row({
       categoryId,
       "user",
     );
+  }
+
+  function addTagById(tagId: string) {
+    if (!me) return;
+    const tag = (household.tags ?? []).find((t) => t?.id === tagId);
+    if (!tag) return;
+    const group = household._owner.castAs(Group);
+    addTagToTransaction({ household, meAccountId: me.id, group }, tx, tag);
+    setAddingTag(false);
+  }
+
+  function removeTagById(tagId: string) {
+    if (!me) return;
+    const tag = (household.tags ?? []).find((t) => t?.id === tagId);
+    if (!tag) return;
+    const group = household._owner.castAs(Group);
+    removeTagFromTransaction({ household, meAccountId: me.id, group }, tx, tag);
   }
 
   return (
@@ -252,6 +279,44 @@ function Row({
         </div>
         <div className="muted">
           {new Date(tx.bookedAt).toLocaleDateString()} \u2022 {accountName}
+        </div>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+          {activeTags.map((t) => (
+            <span
+              key={t.id}
+              onClick={() => removeTagById(t.id)}
+              style={{
+                fontSize: 11,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: `color-mix(in srgb, ${t.color} 20%, transparent)`,
+                color: t.color,
+                cursor: "pointer",
+              }}
+              title="Click to remove"
+            >
+              {t.name} \u00d7
+            </span>
+          ))}
+          {addingTag ? (
+            <select
+              autoFocus
+              onBlur={() => setAddingTag(false)}
+              onChange={(e) => e.target.value && addTagById(e.target.value)}
+              style={{ width: 120, fontSize: 11, padding: "1px 4px" }}
+              defaultValue=""
+            >
+              <option value="" disabled>add tag\u2026</option>
+              {availableTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          ) : availableTags.length > 0 ? (
+            <button
+              onClick={() => setAddingTag(true)}
+              style={{ fontSize: 11, padding: "1px 6px", border: "1px dashed var(--border)", background: "transparent", borderRadius: 999, cursor: "pointer" }}
+            >
+              + tag
+            </button>
+          ) : null}
         </div>
         {expanded && pending.map((s, i) => (
           <SuggestionCard key={i} tx={tx} suggestion={s} meAccountId={me?.id ?? ""} />

@@ -6,11 +6,12 @@ import { TransactionsView } from "./views/Transactions";
 import { ClustersView } from "./views/Clusters";
 import { CategoriesView } from "./views/Categories";
 import { DashboardView } from "./views/Dashboard";
+import { TagsView } from "./views/Tags";
 import { RulesView } from "./views/Rules";
 import { ModerationView } from "./views/Moderation";
 import { SettingsView } from "./views/Settings";
 
-type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "rules" | "moderation" | "settings";
+type Tab = "dashboard" | "household" | "accounts" | "transactions" | "clusters" | "categories" | "tags" | "rules" | "moderation" | "settings";
 
 export function App() {
   return (
@@ -33,6 +34,7 @@ function Shell() {
           <NavButton current={tab} id="transactions" onClick={setTab}>Transactions</NavButton>
           <NavButton current={tab} id="clusters" onClick={setTab}>Clusters</NavButton>
           <NavButton current={tab} id="categories" onClick={setTab}>Categories</NavButton>
+          <NavButton current={tab} id="tags" onClick={setTab}>Tags</NavButton>
           <NavButton current={tab} id="rules" onClick={setTab}>Rules</NavButton>
           <NavButton current={tab} id="moderation" onClick={setTab}>Moderation</NavButton>
           <NavButton current={tab} id="settings" onClick={setTab}>Settings</NavButton>
@@ -45,6 +47,7 @@ function Shell() {
         {tab === "transactions" && <TransactionsView />}
         {tab === "clusters" && <ClustersView />}
         {tab === "categories" && <CategoriesView />}
+        {tab === "tags" && <TagsView />}
         {tab === "rules" && <RulesView />}
         {tab === "moderation" && <ModerationView />}
         {tab === "settings" && <SettingsView />}

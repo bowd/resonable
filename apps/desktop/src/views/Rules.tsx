@@ -144,6 +144,10 @@ function AddRuleForm({ household, onDone }: { household: Household; onDone: () =
     .filter((c) => Boolean(c) && !c!.archived)
     .map((c) => ({ id: c!.id, name: c!.name }));
 
+  const tags = (household.tags ?? [])
+    .filter((t) => Boolean(t) && !t!.archived)
+    .map((t) => ({ id: t!.id, name: t!.name, color: t!.color }));
+
   function save() {
     if (!me || !spec) return;
     setErr(null);
@@ -165,7 +169,7 @@ function AddRuleForm({ household, onDone }: { household: Household; onDone: () =
     <>
       <label>Name</label>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Groceries (SPAR)" />
-      <RuleBuilder value={spec} onChange={setSpec} categories={categories} />
+      <RuleBuilder value={spec} onChange={setSpec} categories={categories} tags={tags} />
       {err && <div className="muted" style={{ marginTop: 8 }}>{err}</div>}
       <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
         <button className="primary" onClick={save} disabled={!spec}>Save</button>
